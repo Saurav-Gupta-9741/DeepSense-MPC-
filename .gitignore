@@ -22,3 +22,7 @@ venv/
 Thumbs.db
 *.swp
 *~
+
+# Test outputs
+pytest.log
+.pytest_cache/

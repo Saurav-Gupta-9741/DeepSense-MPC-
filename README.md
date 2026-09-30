@@ -1,5 +1,7 @@
 # PervasiveSense — DeepSense Multi-Context & Ergonomics Engine
 
+[![Build & test](https://github.com/Saurav-Gupta-9741/DeepSense-MPC-/actions/workflows/build.yml/badge.svg)](https://github.com/Saurav-Gupta-9741/DeepSense-MPC-/actions/workflows/build.yml)
+
 Real-time, on-device human context sensing for Android: physical activity
 (DeepSense TinyML model), posture & sedentary health, fall detection, road-hazard
 mapping in vehicles, and a daily wellness score — all from the phone's IMU,
@@ -174,11 +176,25 @@ Without the dataset variables, the 16 tests that need no data still run (runtime
 compatibility, asset integrity, I/O contract, robustness, resting phone in any
 orientation). The 8 data-dependent tests are skipped with a reason.
 
+Both suites run automatically in CI on every push; the model job fails if any
+test is skipped, so the real-data tests cannot silently drop out.
+
 **Negative controls.** The model suite fails the v1 model three independent ways,
 including the exact on-device error. The resampler, step and latency tests were
 checked against deliberately broken inputs.
 
 ---
+
+## Get the APK
+
+Every push is built and tested by GitHub Actions (`.github/workflows/build.yml`):
+49 engine tests, 24 model tests on real data, then the debug APK.
+
+- **Latest build:** Actions tab → newest green *Build & test* run → *Artifacts* → `PervasiveSense-debug-apk` (a zip containing the APK).
+- **Release download:** pushing a tag such as `v2.0.0` publishes a GitHub Release with the APK attached.
+
+Uninstall any older PervasiveSense first: APKs built on different machines are
+signed with different debug keys, and Android refuses to update across keys.
 
 ## Build & run
 
@@ -217,6 +233,7 @@ model/
   deepsense_int8.tflite          model (identical to the app asset; a test enforces this)
   model_metrics.json             held-out metrics and confusion matrices
 tests/test_tflite_model.py      model validation in the app's runtime
+.github/workflows/build.yml     CI: tests + APK artifact + Release on tags
 docs/                           testing guide; v1 design notes (historical)
 ```
 

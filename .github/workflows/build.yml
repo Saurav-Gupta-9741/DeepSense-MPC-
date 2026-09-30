@@ -1,0 +1,95 @@
+# Builds and tests PervasiveSense on every push; publishes the APK.
+#   - every push / manual run : APK available under Actions > run > Artifacts
+#   - push a tag like v2.0.0  : GitHub Release with the APK attached
+name: Build & test
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only to attach the APK to a Release on tag pushes
+
+jobs:
+  android:
+    name: Engine tests + APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: PervasiveSense
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Engine unit tests (49 JVM tests on real recordings)
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk "PervasiveSense-${GITHUB_REF_NAME//\//-}-debug.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PervasiveSense-debug-apk
+          path: PervasiveSense/PervasiveSense-*-debug.apk
+          if-no-files-found: error
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-test-reports
+          path: PervasiveSense/app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - name: Publish Release with APK (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PervasiveSense/PervasiveSense-*-debug.apk
+          generate_release_notes: true
+
+  model:
+    name: Model tests (TFLite 2.16.1, real data)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the app's TFLite runtime version
+        run: pip install "tensorflow==2.16.1" "keras==3.3.3" pytest
+
+      - name: Fetch datasets (MotionSense + UCI-HAR raw signals)
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/data"
+          git clone -q --depth 1 --filter=blob:none --no-checkout https://github.com/mmalekzadeh/motion-sense.git "$RUNNER_TEMP/ms"
+          git -C "$RUNNER_TEMP/ms" checkout HEAD -- data/A_DeviceMotion_data.zip
+          unzip -q "$RUNNER_TEMP/ms/data/A_DeviceMotion_data.zip" -d "$RUNNER_TEMP/data/ms"
+          git clone -q --depth 1 --filter=blob:none --no-checkout https://github.com/XiqianZ/GettingAndCleaningData.git "$RUNNER_TEMP/uci"
+          git -C "$RUNNER_TEMP/uci" checkout HEAD -- train test
+          echo "MOTIONSENSE_DIR=$RUNNER_TEMP/data/ms" >> "$GITHUB_ENV"
+          echo "UCI_DIR=$RUNNER_TEMP/uci" >> "$GITHUB_ENV"
+
+      - name: Model tests (all 24 must run, none skipped)
+        env:
+          TF_CPP_MIN_LOG_LEVEL: "2"
+        run: pytest -v -rs tests/test_tflite_model.py | tee pytest.log; test ${PIPESTATUS[0]} -eq 0 && ! grep -q " SKIPPED" pytest.log
