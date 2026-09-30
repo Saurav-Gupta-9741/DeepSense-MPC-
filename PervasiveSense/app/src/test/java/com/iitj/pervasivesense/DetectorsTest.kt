@@ -84,8 +84,9 @@ class ErgonomicPostureTrackerTest {
     fun postureLabelOnlyWhenStill() {
         val p = ErgonomicPostureTracker()
         feed(p, Recording.constant(2.0, 0f, -G * 0.7f, G * 0.7f))
-        assertEquals("Forward Slouching", p.report(2_000_000_000L, true).postureStatus)
-        assertEquals("In motion", p.report(2_000_000_000L, false).postureStatus)
+        assertEquals(Posture.SLOUCHING, p.report(2_000_000_000L, true).posture)
+        assertEquals(Posture.MOVING, p.report(2_000_000_000L, false).posture)
+        assertEquals(45, p.report(2_000_000_000L, true).breakAfterMinutes)
     }
 }
 

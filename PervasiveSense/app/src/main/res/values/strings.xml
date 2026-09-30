@@ -1,5 +1,100 @@
 <resources>
     <string name="app_name">PervasiveSense</string>
+    <string name="app_tagline">On-device activity, posture &amp; safety sensing</string>
+
+    <!-- Status pill -->
+    <string name="status_stopped">Stopped</string>
+    <string name="status_starting">Starting</string>
+    <string name="status_live">Live</string>
+    <string name="status_eco">Eco</string>
+    <string name="status_error">Error</string>
+
+    <!-- Hero -->
+    <string name="section_current_activity">Right now</string>
+    <string name="section_model_output">How sure the model is</string>
+    <string name="hero_not_running">Not running</string>
+    <string name="hero_not_running_detail">Tap Start to begin sensing</string>
+    <string name="hero_starting">Starting…</string>
+    <string name="hero_starting_detail">Loading the DeepSense model</string>
+    <string name="hero_calibrating">Calibrating</string>
+    <string name="hero_calibrating_detail">Collecting the first 2.56 s of motion (%1$d%%)</string>
+    <string name="hero_model_error">Model error</string>
+    <string name="hero_model_error_detail">See the message above the button</string>
+    <string name="hero_confidence">%1$d%% confident</string>
+    <string name="hero_since">since %1$s</string>
+    <string name="hero_on_foot">body movement: %1$s</string>
+    <string name="percent">%1$d%%</string>
+
+    <!-- Health -->
+    <string name="section_health">Health</string>
+    <string name="card_posture">Posture &amp; sitting</string>
+    <string name="tile_tilt">Posture</string>
+    <string name="tile_fidget">Restlessness</string>
+    <string name="tile_sitting">Sitting time</string>
+    <string name="posture_moving">Moving</string>
+    <string name="posture_upright">Upright</string>
+    <string name="posture_slouching">Slouching</string>
+    <string name="posture_reclined">Reclined</string>
+    <string name="fidget_calm">Calm</string>
+    <string name="fidget_restless">Restless</string>
+    <string name="sitting_minutes">%1$d min</string>
+    <string name="sitting_goal">break at %1$d min</string>
+    <string name="sitting_break_now">Time for a break</string>
+    <string name="sitting_hint">Sitting time resets when you move or change posture.</string>
+
+    <string name="card_wellness">Daily wellness</string>
+    <string name="score_diversity">Activity variety</string>
+    <string name="score_ergonomic">Posture</string>
+    <string name="score_movement">Movement</string>
+    <string name="score_safety">Safety</string>
+    <string name="grade_excellent">Excellent</string>
+    <string name="grade_good">Good</string>
+    <string name="grade_fair">Fair</string>
+    <string name="grade_low">Low</string>
+    <string name="wellness_summary">%1$s steps, %2$d min walking, %3$d min still</string>
+
+    <!-- Safety & travel -->
+    <string name="section_safety_travel">Safety and travel</string>
+    <string name="card_fall">Fall detection</string>
+    <string name="fall_monitoring">Monitoring</string>
+    <string name="fall_monitoring_detail">Alerts only after impact, stillness and a posture change.</string>
+    <string name="fall_checking">Checking impact…</string>
+    <string name="fall_checking_detail">High impact sensed. Watching for stillness.</string>
+    <string name="fall_detected">Fall detected</string>
+    <string name="fall_detected_detail">Tap “I’m OK” if you are fine.</string>
+    <string name="fall_ack">I’m OK</string>
+    <string name="card_road">Road hazards</string>
+    <string name="road_active">In a vehicle, watching the road</string>
+    <string name="road_paused">Paused until you are in a vehicle</string>
+    <string name="road_no_permission">Needs the Physical activity permission</string>
+    <string name="road_unavailable">Unavailable (needs Google Play services)</string>
+    <string name="road_potholes">Potholes</string>
+    <string name="road_breakers">Speed breakers</string>
+
+    <!-- Activity log -->
+    <string name="section_log">Activity log</string>
+    <string name="card_transitions">Last change</string>
+    <string name="transition_none">No activity changes yet</string>
+    <string name="transition_arrow">%1$s → %2$s</string>
+    <string name="transition_at">at %1$s</string>
+    <string name="transition_count">%1$d changes since you started</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_show">Show sensor details</string>
+    <string name="diagnostics_hide">Hide sensor details</string>
+    <string name="diag_imu">acc  x%1$7.2f y%2$7.2f z%3$7.2f m/s²\ngyro x%4$7.2f y%5$7.2f z%6$7.2f rad/s</string>
+    <string name="diag_engine">Sensor %1$.1f Hz, resampled to 50 Hz\nInference %2$.2f ms (%3$d runs)\nMode: %4$s\nGyroscope: %5$s\nSteps from: %6$s</string>
+    <string name="diag_mode_live">live (every 0.5 s)</string>
+    <string name="diag_mode_eco">eco (every 1.28 s, batched)</string>
+    <string name="yes">yes</string>
+    <string name="no">no</string>
+
+    <!-- Control -->
+    <string name="action_start">Start sensing</string>
+    <string name="action_stop">Stop sensing</string>
+    <string name="action_cancel">Starting… tap to cancel</string>
+
+    <!-- Kept for backward compatibility -->
     <string name="service_title">PervasiveSense Active</string>
     <string name="service_desc">Continuous Multi-Context &amp; Ergonomic Sensing</string>
 </resources>

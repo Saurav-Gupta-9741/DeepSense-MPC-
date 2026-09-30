@@ -7,7 +7,10 @@ Real-time, on-device human context sensing for Android: physical activity
 mapping in vehicles, and a daily wellness score — all from the phone's IMU,
 running continuously in a foreground service with the screen locked.
 
-> **Version 2.0.** v1 could not respond in real time and its model never loaded on
+> Project description and novelties: [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md) ·
+> Phone test checklist: [`docs/PHONE_TEST_PLAN.md`](docs/PHONE_TEST_PLAN.md)
+
+> **Version 2.x.** v1 could not respond in real time and its model never loaded on
 > a phone. The root causes, the fixes and the evidence are in
 > [What changed in v2](#what-changed-in-v2). Build the APK from source (see
 > [Build & run](#build--run)); the v1 APKs were removed because they contain the
@@ -211,11 +214,13 @@ permissions. Physical activity is required on Android 14+ (the "health"
 foreground-service type) and enables vehicle detection and the hardware step
 counter.
 
-Checking it is live: open the app and tap **Start**. The status shows
-*WARMING UP* for 2.56 s, then the context. Pick the phone up and walk:
-*WALKING* appears within about 2–3 s, the class probabilities and IMU values
-update 10 times per second, and the engine line shows the device's real sensor
-rate and the inference time.
+Checking it is live: open the app and tap **Start sensing**. The status pill
+turns **LIVE** and the dashboard shows *Calibrating* for 2.56 s, then the
+activity. Walk with the phone in a trouser pocket: *Walking* appears within
+about 2–3 s and the model-output bars update 10 times per second. Tap
+**Show sensor details** to see the device's real sensor rate and the inference time.
+The full feature-by-feature checklist is in
+[`docs/PHONE_TEST_PLAN.md`](docs/PHONE_TEST_PLAN.md).
 
 ---
 
@@ -234,7 +239,7 @@ model/
   model_metrics.json             held-out metrics and confusion matrices
 tests/test_tflite_model.py      model validation in the app's runtime
 .github/workflows/build.yml     CI: tests + APK artifact + Release on tags
-docs/                           testing guide; v1 design notes (historical)
+docs/                           overview & novelties, phone test plan, testing guide; v1 notes (historical)
 ```
 
 ---

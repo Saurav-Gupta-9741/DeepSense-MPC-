@@ -345,8 +345,10 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             EngineStatus.MODEL_ERROR -> "Model error"
             EngineStatus.ACTIVE -> Display.context(s.context)
         }
-        val text = "Confidence ${(s.confidence * 100).toInt()}% | Wellness ${s.wellness.overallScore}/100 | " +
-            "${s.wellness.totalSteps} steps"
+        // Eco mode only runs while the dashboard is closed, so the notification is where it is visible.
+        val mode = if (s.ecoMode) ", eco mode" else ""
+        val text = "${(s.confidence * 100).toInt()}% confident, wellness ${s.wellness.overallScore}/100, " +
+            "${s.wellness.totalSteps} steps$mode"
         val key = "$title|$text"
         if (key == lastNotificationText) return
         if (lastNotificationT != Long.MIN_VALUE && s.sensorTimeNanos - lastNotificationT < NOTIFICATION_MIN_INTERVAL_NS) return
@@ -385,11 +387,11 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     }
 }
 
-/** Shared display strings for UI and notification. */
+/** Display names shared by the notification ("STAIRS_UP" -> "Stairs up", as on the dashboard). */
 object Display {
     fun context(c: String?): String = when (c) {
         null -> "Detecting"
-        "IN_VEHICLE" -> "IN VEHICLE"
-        else -> c.replace('_', ' ')
+        else -> c.lowercase(java.util.Locale.ROOT).replace('_', ' ')
+            .replaceFirstChar { it.titlecase(java.util.Locale.getDefault()) }
     }
 }

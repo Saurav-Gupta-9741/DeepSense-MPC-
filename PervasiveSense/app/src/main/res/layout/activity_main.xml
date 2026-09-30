@@ -1,596 +1,596 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_dark"
-    android:fillViewport="true">
+    android:orientation="vertical">
 
+    <!-- ============ Header ============ -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="8dp">
 
-        <!-- Header -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_name"
+                android:textColor="@color/primary_glow"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                style="@style/PS.Caption"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_tagline" />
+        </LinearLayout>
+
         <TextView
+            android:id="@+id/tvStatusPill"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="PervasiveSense"
-            android:textColor="@color/primary_cyan"
-            android:textSize="26sp"
-            android:textStyle="bold" />
+            android:background="@drawable/bg_pill"
+            android:paddingStart="12dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="4dp"
+            android:text="@string/status_stopped"
+            android:textColor="@color/bg_dark"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1" />
+    </LinearLayout>
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="DeepSense Multi-Context &amp; Ergonomics Engine"
-            android:textColor="@color/text_muted"
-            android:textSize="13sp"
-            android:layout_marginBottom="16dp" />
+    <!-- ============ Scrolling dashboard ============ -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
 
-        <!-- 1. Live Context & Activity Card -->
-        <com.google.android.material.card.MaterialCardView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="14dp"
-            app:cardBackgroundColor="@color/card_dark"
-            app:cardCornerRadius="16dp"
-            app:strokeColor="@color/card_border"
-            app:strokeWidth="1dp">
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="16dp">
 
-            <LinearLayout
+            <!-- Current activity -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="CURRENT PHYSICAL CONTEXT"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.1"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvCurrentActivity"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="STANDBY (SERVICE IDLE)"
-                    android:textColor="@color/accent_emerald"
-                    android:textSize="24sp"
-                    android:textStyle="bold"
-                    android:layout_marginTop="6dp" />
-
-                <TextView
-                    android:id="@+id/tvConfidence"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Confidence: 0.0%"
-                    android:textColor="@color/text_main"
-                    android:textSize="14sp"
-                    android:layout_marginBottom="8dp" />
-
-                <com.google.android.material.progressindicator.LinearProgressIndicator
-                    android:id="@+id/progressConfidence"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:progress="0"
-                    app:indicatorColor="@color/primary_cyan"
-                    app:trackColor="@color/card_border"
-                    app:trackCornerRadius="4dp" />
-
-                <TextView
-                    android:id="@+id/tvLiveSensor"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="IMU: ax: 0.00 | ay: 0.00 | az: 0.00 m/s²"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:fontFamily="monospace"
-                    android:layout_marginTop="10dp" />
-
-                <TextView
-                    android:id="@+id/tvProbabilities"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Class probabilities appear once sensing starts"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:fontFamily="monospace"
-                    android:layout_marginTop="4dp" />
-
-                <TextView
-                    android:id="@+id/tvEngineInfo"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text=""
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:fontFamily="monospace"
-                    android:layout_marginTop="4dp" />
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 2. Ergonomic Health & Posture Card (Novelty 2) -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="14dp"
-            app:cardBackgroundColor="@color/card_dark"
-            app:cardCornerRadius="16dp"
-            app:strokeColor="@color/card_border"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="ERGONOMICS &amp; SEDENTARY HEALTH"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.1"
-                    android:textStyle="bold" />
+                android:layout_height="wrap_content">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="10dp">
+                    android:orientation="vertical"
+                    android:padding="18dp">
 
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Posture Tilt"
-                            android:textColor="@color/text_muted"
-                            android:textSize="12sp" />
-                        <TextView
-                            android:id="@+id/tvPostureTilt"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0.0° (Upright)"
-                            android:textColor="@color/text_main"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Fidget Index"
-                            android:textColor="@color/text_muted"
-                            android:textSize="12sp" />
-                        <TextView
-                            android:id="@+id/tvFidgetIndex"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0.00 (Calm)"
-                            android:textColor="@color/accent_emerald"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tvSedentaryTimer"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Continuous Stationary Time: 0 min (Break goal: 45m)"
-                    android:textColor="@color/accent_amber"
-                    android:textSize="12sp"
-                    android:layout_marginTop="10dp" />
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 3. Vehicular Transit & Road Hazards (Novelty 1 & 3) -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="14dp"
-            app:cardBackgroundColor="@color/card_dark"
-            app:cardCornerRadius="16dp"
-            app:strokeColor="@color/card_border"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="TRANSIT &amp; ROAD HAZARD MAPPING"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.1"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvRoadStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Road monitoring activates automatically in a vehicle"
-                    android:textColor="@color/text_muted"
-                    android:textSize="12sp"
-                    android:layout_marginTop="4dp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="10dp">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Potholes Tagged"
-                            android:textColor="@color/text_muted"
-                            android:textSize="12sp" />
-                        <TextView
-                            android:id="@+id/tvPotholesCount"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0 detected"
-                            android:textColor="@color/accent_rose"
-                            android:textSize="16sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Speed Breakers"
-                            android:textColor="@color/text_muted"
-                            android:textSize="12sp" />
-                        <TextView
-                            android:id="@+id/tvSpeedBreakersCount"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0 detected"
-                            android:textColor="@color/primary_glow"
-                            android:textSize="16sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                </LinearLayout>
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 4. Fall & Emergency Guardian (Novelty 4) -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
-            app:cardBackgroundColor="@color/card_dark"
-            app:cardCornerRadius="16dp"
-            app:strokeColor="@color/card_border"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="16dp">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
                     <TextView
+                        style="@style/PS.Section"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="SAFETY &amp; FALL GUARDIAN"
+                        android:text="@string/section_current_activity" />
+
+                    <TextView
+                        android:id="@+id/tvCurrentActivity"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/hero_not_running"
                         android:textColor="@color/text_muted"
-                        android:textSize="11sp"
-                        android:letterSpacing="0.1"
+                        android:textSize="32sp"
                         android:textStyle="bold" />
+
                     <TextView
-                        android:id="@+id/tvFallStatus"
+                        android:id="@+id/tvActivityDetail"
+                        style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Arming with Anti-False-Alarm"
-                        android:textColor="@color/accent_emerald"
-                        android:textSize="13sp"
-                        android:layout_marginTop="3dp" />
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnFallAck"
+                        android:text="@string/hero_not_running_detail"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.progressindicator.LinearProgressIndicator
+                        android:id="@+id/progressConfidence"
+                        style="@style/PS.Bar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:max="100" />
+
+                    <TextView
+                        style="@style/PS.Section"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:text="@string/section_model_output" />
+
+                    <!-- One row per model class, created from the model's label file -->
+                    <LinearLayout
+                        android:id="@+id/probContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="vertical" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- HEALTH -->
+            <TextView
+                style="@style/PS.Section"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/section_health" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        style="@style/PS.CardTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/card_posture" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_tile"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+                            <TextView style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/tile_tilt" />
+                            <TextView android:id="@+id/tvTiltValue" style="@style/PS.Value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" />
+                            <TextView android:id="@+id/tvTiltState" style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_tile"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+                            <TextView style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/tile_fidget" />
+                            <TextView android:id="@+id/tvFidgetValue" style="@style/PS.Value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" />
+                            <TextView android:id="@+id/tvFidgetState" style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_tile"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+                            <TextView style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/tile_sitting" />
+                            <TextView android:id="@+id/tvSittingValue" style="@style/PS.Value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" />
+                            <TextView android:id="@+id/tvSittingState" style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <com.google.android.material.progressindicator.LinearProgressIndicator
+                        android:id="@+id/progressSitting"
+                        style="@style/PS.Bar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:max="100" />
+
+                    <TextView
+                        style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
-                        android:text="I'M OK - DISMISS"
+                        android:text="@string/sitting_hint" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        style="@style/PS.CardTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/card_wellness" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_horizontal"
+                            android:orientation="vertical">
+
+                            <FrameLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content">
+
+                                <com.google.android.material.progressindicator.CircularProgressIndicator
+                                    android:id="@+id/progressWellness"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:max="100"
+                                    app:indicatorColor="@color/accent_emerald"
+                                    app:indicatorSize="92dp"
+                                    app:trackColor="@color/track"
+                                    app:trackThickness="8dp" />
+
+                                <TextView
+                                    android:id="@+id/tvWellnessScore"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_gravity="center"
+                                    android:text="--"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold" />
+                            </FrameLayout>
+
+                            <TextView
+                                android:id="@+id/tvWellnessGrade"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:text="--"
+                                android:textColor="@color/text_muted"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <!-- Component scores -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="18dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                                <TextView style="@style/PS.Caption" android:layout_width="84dp" android:layout_height="wrap_content" android:text="@string/score_diversity" />
+                                <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/barDiversity" style="@style/PS.Bar" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:max="100" />
+                                <TextView android:id="@+id/tvDiversityScore" style="@style/PS.Caption" android:layout_width="32dp" android:layout_height="wrap_content" android:gravity="end" android:text="--" />
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+                                <TextView style="@style/PS.Caption" android:layout_width="84dp" android:layout_height="wrap_content" android:text="@string/score_ergonomic" />
+                                <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/barErgonomic" style="@style/PS.Bar" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:max="100" />
+                                <TextView android:id="@+id/tvErgonomicScore" style="@style/PS.Caption" android:layout_width="32dp" android:layout_height="wrap_content" android:gravity="end" android:text="--" />
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+                                <TextView style="@style/PS.Caption" android:layout_width="84dp" android:layout_height="wrap_content" android:text="@string/score_movement" />
+                                <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/barMovement" style="@style/PS.Bar" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:max="100" />
+                                <TextView android:id="@+id/tvMovementScore" style="@style/PS.Caption" android:layout_width="32dp" android:layout_height="wrap_content" android:gravity="end" android:text="--" />
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+                                <TextView style="@style/PS.Caption" android:layout_width="84dp" android:layout_height="wrap_content" android:text="@string/score_safety" />
+                                <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/barSafety" style="@style/PS.Bar" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:max="100" />
+                                <TextView android:id="@+id/tvSafetyScore" style="@style/PS.Caption" android:layout_width="32dp" android:layout_height="wrap_content" android:gravity="end" android:text="--" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvWellnessSummary"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="--" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- SAFETY & TRAVEL -->
+            <TextView
+                style="@style/PS.Section"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/section_safety_travel" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            style="@style/PS.CardTitle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/card_fall" />
+
+                        <View
+                            android:id="@+id/fallDot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="@drawable/bg_dot" />
+
+                        <TextView
+                            android:id="@+id/tvFallStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="@string/fall_monitoring"
+                            android:textColor="@color/accent_emerald"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvFallDetail"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/fall_monitoring_detail" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFallAck"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/fall_ack"
                         android:textColor="@color/bg_dark"
                         android:visibility="gone"
                         app:backgroundTint="@color/accent_amber"
-                        app:cornerRadius="10dp" />
+                        app:cornerRadius="12dp" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🛡️"
-                    android:textSize="24sp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 5. Daily Wellness Score (Novelty C) -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            app:cardBackgroundColor="@color/card_dark"
-            app:cardCornerRadius="16dp"
-            app:strokeColor="@color/card_border"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="DAILY WELLNESS SCORE"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.1"
-                    android:textStyle="bold" />
+                android:layout_height="wrap_content">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="8dp">
+                    android:orientation="vertical"
+                    android:padding="16dp">
 
                     <TextView
-                        android:id="@+id/tvWellnessScore"
+                        style="@style/PS.CardTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="--"
-                        android:textColor="@color/primary_cyan"
-                        android:textSize="36sp"
-                        android:textStyle="bold" />
+                        android:text="@string/card_road" />
 
                     <TextView
+                        android:id="@+id/tvRoadStatus"
+                        style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="/100"
-                        android:textColor="@color/text_muted"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/road_paused" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_tile"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+                            <TextView style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/road_potholes" />
+                            <TextView android:id="@+id/tvPotholesCount" style="@style/PS.Value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/accent_rose" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_tile"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+                            <TextView style="@style/PS.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/road_breakers" />
+                            <TextView android:id="@+id/tvSpeedBreakersCount" style="@style/PS.Value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/primary_glow" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ACTIVITY LOG -->
+            <TextView
+                style="@style/PS.Section"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/section_log" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/card_transitions" />
+
+                    <TextView
+                        android:id="@+id/tvLastTransition"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/transition_none"
+                        android:textColor="@color/primary_glow"
                         android:textSize="16sp"
-                        android:layout_marginStart="4dp" />
-
-                    <View
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:layout_weight="1" />
+                        android:textStyle="bold" />
 
                     <TextView
-                        android:id="@+id/tvWellnessGrade"
+                        android:id="@+id/tvTransitionMeta"
+                        style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="--"
-                        android:textColor="@color/text_muted"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:layout_marginTop="2dp"
+                        android:text="" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="8dp">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Diversity"
-                            android:textColor="@color/text_muted"
-                            android:textSize="10sp" />
-                        <TextView
-                            android:id="@+id/tvDiversityScore"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="--"
-                            android:textColor="@color/accent_emerald"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Ergonomic"
-                            android:textColor="@color/text_muted"
-                            android:textSize="10sp" />
-                        <TextView
-                            android:id="@+id/tvErgonomicScore"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="--"
-                            android:textColor="@color/primary_glow"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Movement"
-                            android:textColor="@color/text_muted"
-                            android:textSize="10sp" />
-                        <TextView
-                            android:id="@+id/tvMovementScore"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="--"
-                            android:textColor="@color/primary_cyan"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Safety"
-                            android:textColor="@color/text_muted"
-                            android:textSize="10sp" />
-                        <TextView
-                            android:id="@+id/tvSafetyScore"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="--"
-                            android:textColor="@color/accent_rose"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tvStepsAndTime"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Steps: 0 | Walk: 0m | Still: 0m"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:layout_marginTop="6dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 6. Activity Transitions & Adaptive Sampling (Novelty A+B) -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            app:cardBackgroundColor="@color/card_dark"
-            app:cardCornerRadius="16dp"
-            app:strokeColor="@color/card_border"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
+            <!-- Diagnostics: collapsed by default -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PS.Card"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
+                android:layout_height="wrap_content">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:orientation="vertical"
+                    android:padding="16dp">
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:id="@+id/tvDiagnosticsToggle"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="CONTEXT TRANSITIONS"
+                        android:minHeight="32dp"
+                        android:gravity="center_vertical"
+                        android:text="@string/diagnostics_show"
                         android:textColor="@color/text_muted"
-                        android:textSize="11sp"
-                        android:letterSpacing="0.1"
+                        android:textSize="13sp"
                         android:textStyle="bold" />
 
-                    <TextView
-                        android:id="@+id/tvSamplingRate"
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:id="@+id/diagnosticsContent"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="-- Hz"
-                        android:textColor="@color/accent_emerald"
-                        android:textSize="11sp"
-                        android:textStyle="bold" />
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tvLiveSensor"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:fontFamily="monospace"
+                            android:text="--"
+                            android:textColor="@color/text_main"
+                            android:textSize="11sp" />
+
+                        <TextView
+                            android:id="@+id/tvEngineInfo"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:fontFamily="monospace"
+                            android:text="--"
+                            android:textColor="@color/text_muted"
+                            android:textSize="11sp" />
+                    </LinearLayout>
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </ScrollView>
 
-                <TextView
-                    android:id="@+id/tvLastTransition"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="No transitions detected yet"
-                    android:textColor="@color/primary_glow"
-                    android:textSize="13sp"
-                    android:layout_marginTop="6dp" />
-
-                <TextView
-                    android:id="@+id/tvTransitionCount"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Total transitions: 0 | Sensor: Phone IMU"
-                    android:textColor="@color/text_muted"
-                    android:textSize="11sp"
-                    android:layout_marginTop="4dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Service Toggle Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnToggleService"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="START PERVASIVE SENSING"
-            android:textColor="@color/bg_dark"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            app:backgroundTint="@color/primary_cyan"
-            app:cornerRadius="14dp" />
+    <!-- ============ Bottom control bar ============ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/card_dark"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="12dp">
 
         <TextView
             android:id="@+id/tvServiceMessage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Foreground Service runs with screen locked in pocket"
-            android:textColor="@color/text_muted"
-            android:textSize="11sp"
-            android:gravity="center"
-            android:layout_marginTop="8dp" />
+            android:layout_marginBottom="8dp"
+            android:text=""
+            android:textColor="@color/accent_amber"
+            android:textSize="12sp"
+            android:visibility="gone" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnToggleService"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="@string/action_start"
+            android:textColor="@color/bg_dark"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            app:backgroundTint="@color/primary_cyan"
+            app:cornerRadius="14dp" />
     </LinearLayout>
-</ScrollView>
+</LinearLayout>

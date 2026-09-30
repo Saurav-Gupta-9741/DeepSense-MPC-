@@ -4,13 +4,17 @@ import kotlin.math.atan2
 import kotlin.math.exp
 import kotlin.math.sqrt
 
+/** Posture class; only meaningful while the user is stationary. */
+enum class Posture { MOVING, UPRIGHT, SLOUCHING, RECLINED }
+
 data class ErgonomicReport(
     val postureTiltAngle: Float,
-    val postureStatus: String,
+    val posture: Posture,
     val fidgetIndex: Float,
     val isFidgeting: Boolean,
     val continuousStillMinutes: Int,
-    val needsBreakPrompt: Boolean
+    val needsBreakPrompt: Boolean,
+    val breakAfterMinutes: Int
 )
 
 /**
@@ -106,20 +110,21 @@ class ErgonomicPostureTracker(
             }
         }
         val minutes = if (stillSinceNanos < 0) 0 else ((tNanos - stillSinceNanos) / 60_000_000_000L).toInt()
-        val status = when {
-            !isStill -> "In motion"
-            tilt < slouchBelowDeg -> "Forward Slouching"
-            tilt > reclineAboveDeg -> "Reclined / Leaning"
-            else -> "Upright / Ergonomic"
+        val posture = when {
+            !isStill -> Posture.MOVING
+            tilt < slouchBelowDeg -> Posture.SLOUCHING
+            tilt > reclineAboveDeg -> Posture.RECLINED
+            else -> Posture.UPRIGHT
         }
         val fidget = fidgetIndex
         return ErgonomicReport(
             postureTiltAngle = tilt,
-            postureStatus = status,
+            posture = posture,
             fidgetIndex = fidget,
             isFidgeting = fidget > fidgetRestlessThreshold,
             continuousStillMinutes = minutes,
-            needsBreakPrompt = minutes >= breakAfterMinutes
+            needsBreakPrompt = minutes >= breakAfterMinutes,
+            breakAfterMinutes = breakAfterMinutes
         )
     }
 

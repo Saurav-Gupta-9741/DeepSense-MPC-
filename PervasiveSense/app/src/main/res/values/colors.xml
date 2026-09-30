@@ -2,6 +2,7 @@
     <color name="bg_dark">#0F172A</color>
     <color name="card_dark">#1E293B</color>
     <color name="card_border">#334155</color>
+    <color name="track">#273449</color>
     <color name="primary_cyan">#06B6D4</color>
     <color name="primary_glow">#22D3EE</color>
     <color name="accent_emerald">#10B981</color>

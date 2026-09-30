@@ -12,6 +12,7 @@ data class SensingSnapshot(
     val context: String?,
     val bodyActivity: String?,
     val confidence: Float,
+    /** Smoothed class probabilities in the model's label order (stable for display). */
     val probabilities: List<Pair<String, Float>>,
     val ax: Float, val ay: Float, val az: Float,
     val gx: Float, val gy: Float, val gz: Float,
@@ -220,7 +221,7 @@ class SensingEngine(
         val isStill = ctx == "STILL"
         ergo = posture.report(t, isStill)
         if (ctx != null && lastInferenceT != Long.MIN_VALUE) {
-            wellness.onContextElapsed(ctx, (t - lastInferenceT) / 1e9, ergo.postureStatus == "Forward Slouching")
+            wellness.onContextElapsed(ctx, (t - lastInferenceT) / 1e9, ergo.posture == Posture.SLOUCHING)
         }
         lastInferenceT = t
 
@@ -265,7 +266,7 @@ class SensingEngine(
             context == null -> EngineStatus.WARMING_UP
             else -> EngineStatus.ACTIVE
         }
-        val probs = labels.indices.map { labels[it] to smoother.smoothed[it] }.sortedByDescending { it.second }
+        val probs = labels.indices.map { labels[it] to smoother.smoothed[it] }
         return SensingSnapshot(
             status = status,
             warmupProgress = window.filled.toFloat() / config.windowSize,
