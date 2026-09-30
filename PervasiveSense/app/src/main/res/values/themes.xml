@@ -16,24 +16,24 @@
         <item name="android:layout_marginBottom">12dp</item>
     </style>
 
-    <style name="PS.Section">
+    <style name="PS.Section" parent="">
         <item name="android:textColor">@color/text_muted</item>
         <item name="android:textSize">14sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
-    <style name="PS.CardTitle">
+    <style name="PS.CardTitle" parent="">
         <item name="android:textColor">@color/text_main</item>
         <item name="android:textSize">15sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
-    <style name="PS.Caption">
+    <style name="PS.Caption" parent="">
         <item name="android:textColor">@color/text_muted</item>
         <item name="android:textSize">12sp</item>
     </style>
 
-    <style name="PS.Value">
+    <style name="PS.Value" parent="">
         <item name="android:textColor">@color/text_main</item>
         <item name="android:textSize">20sp</item>
         <item name="android:textStyle">bold</item>
