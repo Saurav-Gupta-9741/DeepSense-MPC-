@@ -7,6 +7,9 @@
 [![Inference](https://img.shields.io/badge/Inference-0.20%20ms-orange.svg)](#performance-benchmarks)
 [![Language](https://img.shields.io/badge/Language-Kotlin%20%7C%20Python-purple.svg)](https://kotlinlang.org)
 [![Testing](https://img.shields.io/badge/Verification-79%2F79%20Tests%20Passed-brightgreen.svg)](#verification--testing)
+[![Download APK](https://img.shields.io/badge/Download%20APK-19.8%20MB-success.svg?logo=android)](./PervasiveSense-debug.apk?raw=true)
+
+> 📲 **Direct Download:** [**`PervasiveSense-debug.apk`**](./PervasiveSense-debug.apk?raw=true) (19.8 MB) — Pre-built, verified, ready to install on Android 8.0+ smartphones.
 
 ---
 
