@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">PervasiveSense</string>
+    <string name="service_title">PervasiveSense Active</string>
+    <string name="service_desc">Continuous Multi-Context &amp; Ergonomic Sensing</string>
+</resources>

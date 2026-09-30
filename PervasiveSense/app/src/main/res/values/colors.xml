@@ -1,0 +1,12 @@
+<resources>
+    <color name="bg_dark">#0F172A</color>
+    <color name="card_dark">#1E293B</color>
+    <color name="card_border">#334155</color>
+    <color name="primary_cyan">#06B6D4</color>
+    <color name="primary_glow">#22D3EE</color>
+    <color name="accent_emerald">#10B981</color>
+    <color name="accent_amber">#F59E0B</color>
+    <color name="accent_rose">#F43F5E</color>
+    <color name="text_main">#F8FAFC</color>
+    <color name="text_muted">#94A3B8</color>
+</resources>
