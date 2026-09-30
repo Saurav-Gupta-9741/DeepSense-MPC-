@@ -1,0 +1,27 @@
+{
+  "walking_pocket": {
+    "source": "MotionSense wlk_7/sub_1.csv",
+    "seconds": 30,
+    "reference_steps_per_second": 1.855
+  },
+  "jogging_pocket": {
+    "source": "MotionSense jog_9/sub_1.csv",
+    "seconds": 20,
+    "reference_steps_per_second": 2.728
+  },
+  "sitting_pocket": {
+    "source": "MotionSense sit_5/sub_1.csv",
+    "seconds": 30,
+    "reference_steps_per_second": 0.0
+  },
+  "upstairs_pocket": {
+    "source": "MotionSense ups_3/sub_1.csv",
+    "seconds": 15,
+    "reference_steps_per_second": 1.477
+  },
+  "standing_pocket": {
+    "source": "MotionSense std_6/sub_1.csv",
+    "seconds": 20,
+    "reference_steps_per_second": 0.0
+  }
+}

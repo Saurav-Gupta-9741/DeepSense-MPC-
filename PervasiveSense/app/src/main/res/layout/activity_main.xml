@@ -92,6 +92,26 @@
                     android:fontFamily="monospace"
                     android:layout_marginTop="10dp" />
 
+                <TextView
+                    android:id="@+id/tvProbabilities"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Class probabilities appear once sensing starts"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace"
+                    android:layout_marginTop="4dp" />
+
+                <TextView
+                    android:id="@+id/tvEngineInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace"
+                    android:layout_marginTop="4dp" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -206,6 +226,15 @@
                     android:letterSpacing="0.1"
                     android:textStyle="bold" />
 
+                <TextView
+                    android:id="@+id/tvRoadStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Road monitoring activates automatically in a vehicle"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp"
+                    android:layout_marginTop="4dp" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -296,6 +325,16 @@
                         android:textColor="@color/accent_emerald"
                         android:textSize="13sp"
                         android:layout_marginTop="3dp" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFallAck"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="I'M OK - DISMISS"
+                        android:textColor="@color/bg_dark"
+                        android:visibility="gone"
+                        app:backgroundTint="@color/accent_amber"
+                        app:cornerRadius="10dp" />
                 </LinearLayout>
 
                 <TextView
@@ -361,11 +400,13 @@
                         android:layout_weight="1" />
 
                     <TextView
-                        android:id="@+id/tvWellnessEmoji"
+                        android:id="@+id/tvWellnessGrade"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="📊"
-                        android:textSize="28sp" />
+                        android:text="--"
+                        android:textColor="@color/text_muted"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -503,7 +544,7 @@
                         android:id="@+id/tvSamplingRate"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="⚡ 50 Hz"
+                        android:text="-- Hz"
                         android:textColor="@color/accent_emerald"
                         android:textSize="11sp"
                         android:textStyle="bold" />
@@ -542,6 +583,7 @@
             app:cornerRadius="14dp" />
 
         <TextView
+            android:id="@+id/tvServiceMessage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Foreground Service runs with screen locked in pocket"

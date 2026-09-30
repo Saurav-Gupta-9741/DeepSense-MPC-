@@ -6,109 +6,86 @@ import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-data class ClassificationResult(
-    val activity: String,
-    val confidence: Float,
-    val allProbabilities: FloatArray
-)
-
-class DeepSenseClassifier(context: Context) {
+/**
+ * TFLite DeepSense model. Contract (verified by tests/test_tflite_model.py):
+ * input float32 [1, 128, 6] = 50 Hz (ax, ay, az m/s², gx, gy, gz rad/s),
+ * row-major; output float32 [1, N] softmax over the labels in
+ * assets/deepsense_labels.txt (shipped together with the model).
+ *
+ * If the model cannot be loaded, [initError] says exactly why and classify()
+ * returns null, which the engine surfaces as MODEL_ERROR on the dashboard -
+ * never a silent "UNKNOWN 0%".
+ */
+class DeepSenseClassifier(context: Context) : ActivityClassifier {
 
     companion object {
         private const val TAG = "DeepSenseClassifier"
+        const val MODEL_ASSET = "deepsense_int8.tflite"
+        const val LABELS_ASSET = "deepsense_labels.txt"
         const val WINDOW_SIZE = 128
         const val NUM_CHANNELS = 6
-        const val NUM_CLASSES = 8
     }
+
+    override val labels: List<String>
+    var initError: String? = null
+        private set
 
     private var interpreter: Interpreter? = null
-
-    val classNames = arrayOf(
-        "STILL",
-        "WALKING",
-        "RUNNING",
-        "STAIRS_UP",
-        "STAIRS_DOWN",
-        "BUS",
-        "CAR",
-        "METRO"
-    )
-
-    // Pre-allocate DirectByteBuffers ONCE to avoid GC churn on every inference
-    private val inputBuffer: ByteBuffer = ByteBuffer.allocateDirect(1 * WINDOW_SIZE * NUM_CHANNELS * 4).apply {
-        order(ByteOrder.nativeOrder())
-    }
-    private val outputBuffer: ByteBuffer = ByteBuffer.allocateDirect(1 * NUM_CLASSES * 4).apply {
-        order(ByteOrder.nativeOrder())
-    }
+    private val inputBuffer: ByteBuffer =
+        ByteBuffer.allocateDirect(WINDOW_SIZE * NUM_CHANNELS * 4).order(ByteOrder.nativeOrder())
+    private val outputBuffer: ByteBuffer
+    private val probabilities: FloatArray
 
     init {
-        try {
-            // Read model bytes directly from assets into a DirectByteBuffer.
-            // This avoids mmap page-alignment (EINVAL) failures on Android devices when the APK asset offset is not 4KB-aligned.
-            val modelBytes = context.assets.open("deepsense_int8.tflite").use { it.readBytes() }
-            val modelBuffer = ByteBuffer.allocateDirect(modelBytes.size).apply {
-                order(ByteOrder.nativeOrder())
-                put(modelBytes)
-                rewind()
-            }
-
-            val options = Interpreter.Options().apply {
-                setNumThreads(2)
-            }
-            interpreter = Interpreter(modelBuffer, options)
-            Log.d(TAG, "TFLite Interpreter initialized successfully! Model size: ${modelBytes.size} bytes")
+        labels = try {
+            context.assets.open(LABELS_ASSET).bufferedReader().readLines().map { it.trim() }.filter { it.isNotEmpty() }
         } catch (e: Exception) {
-            Log.e(TAG, "FATAL: Failed to initialize DeepSense TFLite Interpreter", e)
-            e.printStackTrace()
+            initError = "labels asset missing: ${e.message}"
+            emptyList()
+        }
+        outputBuffer = ByteBuffer.allocateDirect(maxOf(1, labels.size) * 4).order(ByteOrder.nativeOrder())
+        probabilities = FloatArray(labels.size)
+
+        if (initError == null) {
+            try {
+                // Read into a direct buffer instead of mmap: APK asset offsets are not
+                // always page aligned, which makes mmap fail on some devices.
+                val bytes = context.assets.open(MODEL_ASSET).use { it.readBytes() }
+                val model = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder())
+                model.put(bytes).rewind()
+                val it = Interpreter(model, Interpreter.Options().setNumThreads(1))
+                val inShape = it.getInputTensor(0).shape()
+                val outShape = it.getOutputTensor(0).shape()
+                check(inShape.contentEquals(intArrayOf(1, WINDOW_SIZE, NUM_CHANNELS))) {
+                    "unexpected input shape ${inShape.contentToString()}"
+                }
+                check(outShape.contentEquals(intArrayOf(1, labels.size))) {
+                    "output ${outShape.contentToString()} does not match ${labels.size} labels"
+                }
+                interpreter = it
+                Log.i(TAG, "DeepSense loaded: ${bytes.size} bytes, classes=$labels")
+            } catch (t: Throwable) {
+                // Includes "Didn't find op for builtin opcode ..." when model and runtime versions mismatch.
+                initError = t.message ?: t.javaClass.simpleName
+                Log.e(TAG, "DeepSense failed to load", t)
+            }
         }
     }
 
-    /**
-     * Runs inference on a 128-sample window (128 x 6 = 768 floats).
-     * Shape: [1, 128, 6]
-     * Reuses pre-allocated ByteBuffers to avoid memory allocation per inference.
-     */
-    fun classify(windowData: FloatArray): ClassificationResult {
-        val currentInterpreter = interpreter
-        if (currentInterpreter == null || windowData.size != WINDOW_SIZE * NUM_CHANNELS) {
-            Log.w(TAG, "classify() aborted: interpreter is null=${currentInterpreter == null} or size=${windowData.size}")
-            return ClassificationResult("UNKNOWN", 0f, FloatArray(NUM_CLASSES))
-        }
-
-        try {
-            // Reuse pre-allocated input buffer
+    override fun classify(window: FloatArray): FloatArray? {
+        val it = interpreter ?: return null
+        if (window.size != WINDOW_SIZE * NUM_CHANNELS) return null
+        return try {
             inputBuffer.rewind()
-            for (value in windowData) {
-                inputBuffer.putFloat(value)
-            }
-
-            // Reuse pre-allocated output buffer
+            inputBuffer.asFloatBuffer().put(window)
             outputBuffer.rewind()
-
-            currentInterpreter.run(inputBuffer, outputBuffer)
-
+            it.run(inputBuffer, outputBuffer)
             outputBuffer.rewind()
-            val probabilities = FloatArray(NUM_CLASSES)
-            var maxIndex = 0
-            var maxProb = -1.0f
-
-            for (i in 0 until NUM_CLASSES) {
-                probabilities[i] = outputBuffer.float
-                if (probabilities[i] > maxProb) {
-                    maxProb = probabilities[i]
-                    maxIndex = i
-                }
-            }
-
-            return ClassificationResult(
-                activity = classNames[maxIndex],
-                confidence = maxProb,
-                allProbabilities = probabilities
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Inference error during classify()", e)
-            return ClassificationResult("UNKNOWN", 0f, FloatArray(NUM_CLASSES))
+            outputBuffer.asFloatBuffer().get(probabilities)
+            probabilities.copyOf()
+        } catch (t: Throwable) {
+            Log.e(TAG, "inference failed", t)
+            null
         }
     }
 

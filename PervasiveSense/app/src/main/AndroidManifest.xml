@@ -2,20 +2,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions for Continuous Ambient Sensing -->
+    <!-- Continuous sensing in a foreground service. "health" is the correct Android 14+
+         type for fitness / activity tracking; it requires ACTIVITY_RECOGNITION at runtime. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Activity recognition: vehicle detection (Play services) and the hardware step counter. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <uses-permission android:name="android.permission.BODY_SENSORS" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission
+        android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+        android:maxSdkVersion="28" />
 
-    <!-- Sensor feature declarations -->
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -31,6 +32,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.PervasiveSense">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -38,12 +40,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Background Pervasive Sensing Foreground Service -->
         <service
             android:name=".SensingForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="health" />
+
+        <!-- Receives Google Activity Recognition results through our own PendingIntent. -->
+        <receiver
+            android:name=".VehicleActivityReceiver"
+            android:exported="false" />
 
     </application>
 

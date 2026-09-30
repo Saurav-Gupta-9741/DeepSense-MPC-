@@ -1,223 +1,235 @@
+"""
+DeepSense TinyML - training & export on REAL smartphone IMU recordings.
+
+    python train_export_deepsense.py --motionsense <dir> --uci <dir> [--epochs 30]
+
+Data: MotionSense (phone in trouser pocket, 24 subjects) + UCI-HAR (phone on
+waist, 30 subjects), both 50 Hz, converted to Android sensor units by
+har_datasets.py. Splits are SUBJECT-DISJOINT: no person in the test set was
+seen in training, so the reported accuracy reflects a new user.
+
+Orientation robustness: every training window is rotated by a uniformly random
+3-D rotation, applied identically to the accelerometer and gyroscope (a rigid
+body rotation), so the model does not depend on how the phone sits in a pocket.
+
+Export: converted with TensorFlow 2.16.1 - the same runtime version the Android
+app bundles (org.tensorflow:tensorflow-lite:2.16.1) - and verified by loading
+the exported flatbuffer in that runtime before it is written.
+"""
+from __future__ import annotations
+
+import argparse
+import json
 import os
-import sys
+import time
+
 import numpy as np
 import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
+import keras
+from keras import layers, ops
 
-print(f"TensorFlow Version: {tf.__version__}")
+from har_datasets import CLASS_NAMES, STANDARD_GRAVITY, WINDOW, load_motionsense, load_uci
 
-np.random.seed(42)
-tf.random.set_seed(42)
+NUM_CLASSES = len(CLASS_NAMES)
+SEED = 42
 
-WINDOW_SIZE = 128  # 128 samples at 50 Hz = 2.56 seconds
-NUM_CHANNELS = 6   # ax, ay, az, gx, gy, gz
-NUM_CLASSES = 8
+# Subject-disjoint splits. MotionSense subjects 1..24, UCI subjects 101..130.
+MS_TEST, MS_VAL = {4, 8, 12, 16, 20, 24}, {2, 14, 22}
+UCI_TEST = {102, 104, 109, 110, 112, 113, 118, 120, 124}  # official UCI test subjects
+UCI_VAL = {101, 111, 121}
 
-CLASS_NAMES = [
-    "STILL",
-    "WALKING",
-    "RUNNING",
-    "STAIRS_UP",
-    "STAIRS_DOWN",
-    "BUS",
-    "CAR",
-    "METRO"
-]
 
-def generate_synthetic_kinematic_dataset(samples_per_class=600):
-    X = []
-    y = []
-    t = np.linspace(0, 2.56, WINDOW_SIZE)
-    
-    for cls_idx, cls_name in enumerate(CLASS_NAMES):
-        for _ in range(samples_per_class):
-            data = np.zeros((WINDOW_SIZE, NUM_CHANNELS))
-            noise = np.random.normal(0, 0.05, (WINDOW_SIZE, NUM_CHANNELS))
-            
-            if cls_name == "STILL":
-                data[:, 1] = 9.8  # vertical gravity
-                data += noise * 0.3
-                
-            elif cls_name == "WALKING":
-                freq = np.random.uniform(1.6, 2.0)
-                phase = np.random.uniform(0, 2*np.pi)
-                data[:, 1] = 9.8 + 2.5 * np.sin(2 * np.pi * freq * t + phase)
-                data[:, 2] = 1.8 * np.cos(2 * np.pi * freq * t + phase)
-                data[:, 3] = 0.8 * np.sin(2 * np.pi * freq * t + phase)
-                data += noise
-                
-            elif cls_name == "RUNNING":
-                freq = np.random.uniform(2.8, 3.5)
-                phase = np.random.uniform(0, 2*np.pi)
-                data[:, 1] = 9.8 + 7.0 * np.sin(2 * np.pi * freq * t + phase)
-                data[:, 2] = 4.5 * np.cos(2 * np.pi * freq * t + phase)
-                data[:, 0] = 2.0 * np.sin(np.pi * freq * t)
-                data[:, 3] = 2.5 * np.sin(2 * np.pi * freq * t + phase)
-                data += noise * 1.5
-                
-            elif cls_name == "STAIRS_UP":
-                freq = np.random.uniform(1.2, 1.5)
-                phase = np.random.uniform(0, 2*np.pi)
-                step_wave = np.sin(2 * np.pi * freq * t + phase)
-                step_wave = np.where(step_wave > 0, step_wave * 1.5, step_wave * 0.6)
-                data[:, 1] = 9.8 + 3.2 * step_wave
-                data[:, 2] = 1.4 * np.cos(2 * np.pi * freq * t + phase)
-                data[:, 4] = 0.6 * np.sin(2 * np.pi * freq * t)
-                data += noise
-                
-            elif cls_name == "STAIRS_DOWN":
-                freq = np.random.uniform(1.4, 1.7)
-                phase = np.random.uniform(0, 2*np.pi)
-                step_wave = np.sin(2 * np.pi * freq * t + phase)
-                step_wave = np.where(step_wave < 0, step_wave * 1.8, step_wave * 0.7)
-                data[:, 1] = 9.8 + 3.8 * step_wave
-                data[:, 2] = 1.9 * np.cos(2 * np.pi * freq * t + phase)
-                data += noise * 1.2
-                
-            elif cls_name == "BUS":
-                data[:, 1] = 9.8 + 0.6 * np.sin(2 * np.pi * 14.0 * t)
-                data[:, 2] = 0.4 * np.sin(2 * np.pi * 0.4 * t)
-                data[:, 5] = 0.2 * np.sin(2 * np.pi * 14.0 * t)
-                data += noise * 0.8
-                
-            elif cls_name == "CAR":
-                data[:, 1] = 9.8 + 0.3 * np.sin(2 * np.pi * 22.0 * t)
-                data[:, 0] = 0.8 * np.sin(2 * np.pi * 0.2 * t)
-                data[:, 2] = 0.7 * np.cos(2 * np.pi * 0.3 * t)
-                data += noise * 0.5
-                
-            elif cls_name == "METRO":
-                data[:, 1] = 9.8 + 0.5 * np.sin(2 * np.pi * 4.2 * t) + 0.2 * np.sin(2 * np.pi * 8.4 * t)
-                data[:, 2] = 0.9 * np.sin(2 * np.pi * 0.1 * t)
-                data += noise * 0.4
-                
-            X.append(data)
-            y.append(cls_idx)
-            
-    X = np.array(X, dtype=np.float32)
-    y = np.array(y, dtype=np.int32)
-    
-    indices = np.arange(len(X))
-    np.random.shuffle(indices)
-    return X[indices], y[indices]
+# ------------------------------------------------------------------ augmentation
+def random_rotations(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Uniformly distributed rotation matrices (Shoemake's quaternion method)."""
+    u1, u2, u3 = rng.random(n), rng.random(n), rng.random(n)
+    q = np.stack([
+        np.sqrt(1 - u1) * np.sin(2 * np.pi * u2), np.sqrt(1 - u1) * np.cos(2 * np.pi * u2),
+        np.sqrt(u1) * np.sin(2 * np.pi * u3), np.sqrt(u1) * np.cos(2 * np.pi * u3)], axis=1)
+    x, y, z, w = q.T
+    return np.stack([
+        np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], -1),
+        np.stack([2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], -1),
+        np.stack([2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], -1)], 1)
 
-def build_deepsense_tinyml():
+
+def rotate(x: np.ndarray, r: np.ndarray) -> np.ndarray:
+    acc = np.einsum("nij,ntj->nti", r, x[:, :, :3])
+    gyr = np.einsum("nij,ntj->nti", r, x[:, :, 3:])
+    return np.concatenate([acc, gyr], -1)
+
+
+def augment(x: np.ndarray, y: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    n = len(x)
+    x = x.astype(np.float32).copy()
+    # Scale the dynamic (non-gravity) part: models gait vigour & placement. STILL
+    # windows may shrink to ~0 dynamics, which is exactly a phone resting on a desk.
+    grav = x[:, :, :3].mean(axis=1, keepdims=True)
+    lo = np.where(y == 0, 0.0, 0.8)[:, None, None]
+    s = lo + rng.random((n, 1, 1)) * (1.2 - lo)
+    x[:, :, :3] = grav + (x[:, :, :3] - grav) * s
+    x[:, :, 3:] *= s
+    x = rotate(x, random_rotations(n, rng))
+    # Sensor noise & gyro bias typical of consumer MEMS IMUs.
+    x[:, :, :3] += rng.normal(0, 0.03, (n, WINDOW, 3))
+    x[:, :, 3:] += rng.normal(0, 0.004, (n, WINDOW, 3)) + rng.normal(0, 0.01, (n, 1, 3))
+    return x.astype(np.float32)
+
+
+class AugmentedSequence(keras.utils.PyDataset):
+    def __init__(self, x, y, weights, batch, seed):
+        super().__init__()
+        self.x, self.y, self.w, self.batch = x, y, weights, batch
+        self.rng = np.random.default_rng(seed)
+        self.order = self.rng.permutation(len(x))
+
+    def __len__(self):
+        return int(np.ceil(len(self.x) / self.batch))
+
+    def __getitem__(self, i):
+        idx = self.order[i * self.batch:(i + 1) * self.batch]
+        return augment(self.x[idx], self.y[idx], self.rng), self.y[idx], self.w[self.y[idx]]
+
+    def on_epoch_end(self):
+        self.order = self.rng.permutation(len(self.x))
+
+
+# ------------------------------------------------------------------ model
+def build_model() -> keras.Model:
     """
-    Modernized DeepSense TinyML:
-    - 2 Separate Sensor Branches (Accelerometer & Gyroscope)
-    - Cross-Sensor Interaction Fusion
-    - Temporal Multi-scale Dilated Convolutions (100% TFLite compatible, 0 latency)
-    - Global Pooling + Classifier
+    Dual-branch DeepSense-style 1-D CNN. Input contract [1, 128, 6] =
+    (ax, ay, az [m/s^2], gx, gy, gz [rad/s]) at 50 Hz, row-major (sample, channel).
     """
-    inputs = keras.Input(shape=(WINDOW_SIZE, NUM_CHANNELS), name="imu_input")
-    
-    accel = layers.Lambda(lambda x: x[:, :, 0:3], name="accel_slice")(inputs)
-    gyro = layers.Lambda(lambda x: x[:, :, 3:6], name="gyro_slice")(inputs)
-    
-    # 1. Accelerometer Branch
-    a = layers.Conv1D(32, kernel_size=5, padding="same", activation="relu")(accel)
-    a = layers.BatchNormalization()(a)
-    a = layers.Conv1D(32, kernel_size=3, padding="same", activation="relu")(a)
-    a = layers.MaxPooling1D(pool_size=2)(a)
-    
-    # 2. Gyroscope Branch
-    g = layers.Conv1D(32, kernel_size=5, padding="same", activation="relu")(gyro)
-    g = layers.BatchNormalization()(g)
-    g = layers.Conv1D(32, kernel_size=3, padding="same", activation="relu")(g)
-    g = layers.MaxPooling1D(pool_size=2)(g)
-    
-    # 3. Cross-Sensor Fusion
-    fused = layers.Concatenate(axis=-1)([a, g])
-    fused = layers.Conv1D(64, kernel_size=3, padding="same", activation="relu")(fused)
-    fused = layers.BatchNormalization()(fused)
-    
-    # 4. Temporal Multi-Scale Convolutions (Dilated CNN replaces heavy dynamic GRU)
-    t1 = layers.Conv1D(64, kernel_size=3, dilation_rate=1, padding="same", activation="relu")(fused)
-    t2 = layers.Conv1D(64, kernel_size=3, dilation_rate=2, padding="same", activation="relu")(t1)
-    t3 = layers.Conv1D(64, kernel_size=3, dilation_rate=4, padding="same", activation="relu")(t2)
-    
-    # Global Temporal Aggregation
-    pooled = layers.GlobalAveragePooling1D()(t3)
-    
-    # 5. Classifier Head
-    dense = layers.Dense(64, activation="relu")(pooled)
-    dense = layers.Dropout(0.2)(dense)
-    outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="activity_probs")(dense)
-    
-    return keras.Model(inputs=inputs, outputs=outputs, name="DeepSense_TinyML")
+    inp = keras.Input(shape=(WINDOW, 6), name="imu_input")
+    acc = layers.Lambda(lambda t: t[:, :, 0:3] / STANDARD_GRAVITY, name="accel_g")(inp)
+    gyr = layers.Lambda(lambda t: t[:, :, 3:6], name="gyro")(inp)
+    # Rotation-invariant magnitude channels.
+    acc_mag = layers.Lambda(lambda t: ops.sqrt(ops.sum(ops.square(t), -1, keepdims=True) + 1e-6), name="accel_mag")(acc)
+    gyr_mag = layers.Lambda(lambda t: ops.sqrt(ops.sum(ops.square(t), -1, keepdims=True) + 1e-6), name="gyro_mag")(gyr)
+    a = layers.Concatenate()([acc, acc_mag])
+    g = layers.Concatenate()([gyr, gyr_mag])
+
+    def branch(t, name):
+        t = layers.Conv1D(32, 5, padding="same", use_bias=False, name=f"{name}_c1")(t)
+        t = layers.BatchNormalization(name=f"{name}_bn1")(t)
+        t = layers.ReLU()(t)
+        t = layers.Conv1D(32, 3, padding="same", activation="relu", name=f"{name}_c2")(t)
+        return layers.MaxPooling1D(2)(t)
+
+    f = layers.Concatenate()([branch(a, "acc"), branch(g, "gyr")])
+    f = layers.Conv1D(64, 3, padding="same", use_bias=False)(f)
+    f = layers.BatchNormalization()(f)
+    f = layers.ReLU()(f)
+    for d in (1, 2, 4):  # multi-scale temporal context (receptive field ~ full window)
+        f = layers.Conv1D(64, 3, dilation_rate=d, padding="same", activation="relu")(f)
+    f = layers.GlobalAveragePooling1D()(f)
+    f = layers.Dense(64, activation="relu")(f)
+    f = layers.Dropout(0.3)(f)
+    out = layers.Dense(NUM_CLASSES, activation="softmax", name="activity_probs")(f)
+    return keras.Model(inp, out, name="DeepSense_TinyML_v2")
+
+
+# ------------------------------------------------------------------ evaluation
+def tflite_predict(model_bytes: bytes, x: np.ndarray) -> np.ndarray:
+    it = tf.lite.Interpreter(model_content=model_bytes)
+    it.allocate_tensors()
+    i, o = it.get_input_details()[0]["index"], it.get_output_details()[0]["index"]
+    out = np.empty((len(x), NUM_CLASSES), np.float32)
+    for k in range(len(x)):
+        it.set_tensor(i, x[k:k + 1])
+        it.invoke()
+        out[k] = it.get_tensor(o)[0]
+    return out
+
+
+def report(y_true, y_pred) -> dict:
+    cm = np.zeros((NUM_CLASSES, NUM_CLASSES), int)
+    for t, p in zip(y_true, y_pred):
+        cm[t, p] += 1
+    recall = cm.diagonal() / np.maximum(cm.sum(1), 1)
+    precision = cm.diagonal() / np.maximum(cm.sum(0), 1)
+    f1 = 2 * precision * recall / np.maximum(precision + recall, 1e-9)
+    present = cm.sum(1) > 0
+    return {"accuracy": float(cm.trace() / cm.sum()), "macro_f1": float(f1[present].mean()),
+            "per_class_f1": {c: float(v) for c, v, p in zip(CLASS_NAMES, f1, present) if p},
+            "confusion": cm.tolist()}
+
 
 def main():
-    print("[1/4] Generating synthetic kinematic dataset (8 classes)...")
-    X, y = generate_synthetic_kinematic_dataset(samples_per_class=600)
-    split = int(0.85 * len(X))
-    X_train, X_val = X[:split], X[split:]
-    y_train, y_val = y[:split], y[split:]
-    print(f"  Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
-    
-    print("[2/4] Building DeepSense TinyML Architecture...")
-    model = build_deepsense_tinyml()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--motionsense", required=True)
+    ap.add_argument("--uci", required=True)
+    ap.add_argument("--epochs", type=int, default=30)
+    ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
+    args = ap.parse_args()
+    assert tf.__version__.startswith("2.16."), (
+        f"Export with TF 2.16.x to match the Android runtime; found {tf.__version__}")
+
+    keras.utils.set_random_seed(SEED)
+    xm, ym, sm = load_motionsense(args.motionsense, stride=32)
+    xu, yu, su = load_uci(args.uci)
+    x, y, s = np.concatenate([xm, xu]), np.concatenate([ym, yu]), np.concatenate([sm, su])
+    test_s, val_s = MS_TEST | UCI_TEST, MS_VAL | UCI_VAL
+    te, va = np.isin(s, list(test_s)), np.isin(s, list(val_s))
+    tr = ~(te | va)
+    print(f"windows train={tr.sum()} val={va.sum()} test={te.sum()} | "
+          f"subjects train={len(set(s[tr]))} val={len(set(s[va]))} test={len(set(s[te]))}")
+
+    counts = np.bincount(y[tr], minlength=NUM_CLASSES)
+    class_w = (counts.sum() / (NUM_CLASSES * counts)).astype(np.float32)
+    # Fixed random rotations for validation/test so every orientation is exercised.
+    x_val = augment(x[va], y[va], np.random.default_rng(1))
+    x_test_rot = rotate(x[te], random_rotations(te.sum(), np.random.default_rng(2))).astype(np.float32)
+
+    model = build_model()
     model.summary()
-    
-    model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"]
-    )
-    
-    print("[3/4] Training model for 12 epochs...")
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        epochs=12,
-        batch_size=32,
-        verbose=1
-    )
-    
-    val_acc = history.history["val_accuracy"][-1]
-    print(f"\n[OK] Training completed with final Validation Accuracy: {val_acc*100:.2f}%\n")
-    
-    print("[4/4] Exporting to TensorFlow Lite...")
-    output_dir = "PervasiveSense_Model"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 1. Standard Float32 TFLite
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    tflite_model = converter.convert()
-    tflite_path = os.path.join(output_dir, "deepsense.tflite")
-    with open(tflite_path, "wb") as f:
-        f.write(tflite_model)
-    print(f"  -> Saved Standard TFLite: {tflite_path} ({len(tflite_model) / 1024:.2f} KB)")
-    
-    # 2. Dynamic Range INT8 Quantized TFLite
-    converter_quant = tf.lite.TFLiteConverter.from_keras_model(model)
-    converter_quant.optimizations = [tf.lite.Optimize.DEFAULT]
-    tflite_quant_model = converter_quant.convert()
-    tflite_quant_path = os.path.join(output_dir, "deepsense_int8.tflite")
-    with open(tflite_quant_path, "wb") as f:
-        f.write(tflite_quant_model)
-    print(f"  -> Saved Quantized INT8 TFLite: {tflite_quant_path} ({len(tflite_quant_model) / 1024:.2f} KB)")
-    
-    # 3. Verification test with TFLite Interpreter
-    print("\n[VERIFY] Testing inference on sample data using TFLite Interpreter...")
-    interpreter = tf.lite.Interpreter(model_path=tflite_quant_path)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    # Test on a walking sample
-    test_idx = np.where(y_val == 1)[0][0]
-    test_sample = np.expand_dims(X_val[test_idx], axis=0) # [1, 128, 6]
-    interpreter.set_tensor(input_details[0]['index'], test_sample)
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-    
-    predicted_class = CLASS_NAMES[np.argmax(output_data)]
-    actual_class = CLASS_NAMES[y_val[test_idx]]
-    print(f"  Test Sample -> Predicted: {predicted_class} | Ground Truth: {actual_class}")
-    print(f"  Confidence: {np.max(output_data) * 100:.1f}%")
-    print(f"  All Class Probs: {dict(zip(CLASS_NAMES, np.round(output_data[0], 3)))}")
-    print("[SUCCESS] DeepSense TinyML is 100% verified and ready for Android deployment!\n")
+    model.compile(optimizer=keras.optimizers.Adam(1e-3), loss="sparse_categorical_crossentropy",
+                  metrics=["accuracy"])
+    t0 = time.time()
+    model.fit(AugmentedSequence(x[tr], y[tr], class_w, 64, SEED), validation_data=(x_val, y[va]),
+              epochs=args.epochs, verbose=2,
+              callbacks=[keras.callbacks.ReduceLROnPlateau(patience=3, factor=0.5, min_lr=1e-5),
+                         keras.callbacks.EarlyStopping(patience=7, restore_best_weights=True,
+                                                       monitor="val_accuracy")])
+    print(f"training took {time.time() - t0:.0f}s")
+
+    # ---- export (dynamic-range INT8) and verify in the 2.16 runtime
+    # Keras 3 models are exported via a concrete function with the exact Android
+    # input signature (from_keras_model is broken for Keras 3 on TF 2.16).
+    serve = tf.function(lambda t: model(t, training=False),
+                        input_signature=[tf.TensorSpec([1, WINDOW, 6], tf.float32, name="imu_input")])
+    conv = tf.lite.TFLiteConverter.from_concrete_functions([serve.get_concrete_function()], model)
+    conv.optimizations = [tf.lite.Optimize.DEFAULT]
+    tfl = conv.convert()
+    tflite_predict(tfl, x[te][:1].astype(np.float32))  # raises if the 2.16 runtime cannot load it
+
+    metrics = {"tensorflow": tf.__version__, "classes": CLASS_NAMES, "model_bytes": len(tfl),
+               "splits": {"train_windows": int(tr.sum()), "test_windows": int(te.sum()),
+                          "test_subjects": sorted(int(v) for v in set(s[te]))}}
+    p_keras = model.predict(x[te], verbose=0)
+    p_tfl = tflite_predict(tfl, x[te].astype(np.float32))
+    p_tfl_rot = tflite_predict(tfl, x_test_rot)
+    metrics["test_keras_native_orientation"] = report(y[te], p_keras.argmax(1))
+    metrics["test_tflite_native_orientation"] = report(y[te], p_tfl.argmax(1))
+    metrics["test_tflite_random_orientation"] = report(y[te], p_tfl_rot.argmax(1))
+    for name, mask in (("motionsense_pocket", te & (s < 100)), ("uci_waist", te & (s >= 100))):
+        sub = mask[te]
+        metrics[f"test_tflite_{name}"] = report(y[te][sub], p_tfl_rot[sub].argmax(1))
+    metrics["int8_vs_float_agreement"] = float((p_keras.argmax(1) == p_tfl.argmax(1)).mean())
+
+    with open(os.path.join(args.out, "deepsense_int8.tflite"), "wb") as fh:
+        fh.write(tfl)
+    # Labels travel with the model; the Android classifier reads them from assets.
+    with open(os.path.join(args.out, "deepsense_labels.txt"), "w") as fh:
+        fh.write("\n".join(CLASS_NAMES) + "\n")
+    with open(os.path.join(args.out, "model_metrics.json"), "w") as fh:
+        json.dump(metrics, fh, indent=2)
+    for k, v in metrics.items():
+        if k.startswith("test_"):
+            print(f"{k:40s} acc={v['accuracy']*100:5.1f}%  macroF1={v['macro_f1']:.3f}")
+    print(f"INT8 vs float argmax agreement: {metrics['int8_vs_float_agreement']*100:.2f}%  "
+          f"| size {len(tfl)/1024:.1f} KB")
+
 
 if __name__ == "__main__":
     main()

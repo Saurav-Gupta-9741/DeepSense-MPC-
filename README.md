@@ -1,233 +1,237 @@
-# PervasiveSense (DeepSense-MPC)
+# PervasiveSense — DeepSense Multi-Context & Ergonomics Engine
 
-> **Energy-Adaptive Context-Aware Smartphone Sensing Framework for Holistic Mobility, Ergonomic Health, and Road Safety Profiling with Transition-Aware Intelligence**
+Real-time, on-device human context sensing for Android: physical activity
+(DeepSense TinyML model), posture & sedentary health, fall detection, road-hazard
+mapping in vehicles, and a daily wellness score — all from the phone's IMU,
+running continuously in a foreground service with the screen locked.
 
-[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-green.svg)](https://developer.android.com)
-[![Model](https://img.shields.io/badge/Model-DeepSense%20TinyML%20(91%20KB)-blue.svg)](#tinyml-architecture)
-[![Inference](https://img.shields.io/badge/Inference-0.20%20ms-orange.svg)](#performance-benchmarks)
-[![Language](https://img.shields.io/badge/Language-Kotlin%20%7C%20Python-purple.svg)](https://kotlinlang.org)
-[![Testing](https://img.shields.io/badge/Verification-79%2F79%20Tests%20Passed-brightgreen.svg)](#verification--testing)
-[![Download APK](https://img.shields.io/badge/Download%20APK-19.8%20MB-success.svg?logo=android)](./PervasiveSense-debug.apk?raw=true)
-
-> 📲 **Direct Download:** [**`PervasiveSense-debug.apk`**](./PervasiveSense-debug.apk?raw=true) (19.8 MB) — Pre-built, verified, ready to install on Android 8.0+ smartphones.
-
----
-
-## 🏛️ Academic Affiliation
-
-* **Institution:** Indian Institute of Technology Jodhpur (IIT Jodhpur)
-* **Department:** Department of Computer Science and Engineering
-* **Course:** Mobile and Pervasive Computing
-* **Student:** Saurav Gupta (`M25CSE029`)
-* **Research Group:** Ubiquitous Systems Research Lab (UbiSys)
-* **Faculty Advisor:** Dr. Suchetana Chakraborty, Associate Professor, CSE, IIT Jodhpur
+> **Version 2.0.** v1 could not respond in real time and its model never loaded on
+> a phone. The root causes, the fixes and the evidence are in
+> [What changed in v2](#what-changed-in-v2). Build the APK from source (see
+> [Build & run](#build--run)); the v1 APKs were removed because they contain the
+> broken model.
 
 ---
 
-## 📖 Executive Summary
+## Headline results (all reproducible, see [Testing](#testing))
 
-**PervasiveSense** is an edge-native, zero-cloud pervasive sensing application that runs continuously in the background on commodity smartphones. Operating under locked-screen and pocket-carried conditions, it fuses on-device TinyML deep learning with physics-based signal processing over a continuous 6-channel IMU stream (3-axis Accelerometer + 3-axis Gyroscope). 
-
-Unlike conventional Human Activity Recognition (HAR) systems that terminate at coarse activity labels, PervasiveSense introduces an **8-dimensional context awareness engine**: vehicular transit distinction, ergonomic spine/thigh posture analysis, restless fidget quantification, road surface anomaly sensing, anti-false-alarm fall detection, activity transition logging, daily wellness scoring, and dynamic energy-aware sensor scaling.
+| What | Result |
+|---|---|
+| Activity accuracy on **15 people never seen in training**, phone in **random orientations** | **97.3 %** (macro-F1 0.954) |
+| Per-class F1 | STILL 0.999 · WALKING 0.976 · RUNNING 0.954 · STAIRS_UP 0.941 · STAIRS_DOWN 0.900 |
+| Prediction agreement when the phone is arbitrarily re-oriented | 98.7 – 99.4 % |
+| Time for a real activity change to appear on screen (real model, 6 unseen people) | **2.1 – 3.6 s** |
+| Dashboard refresh / inference cadence | 10 Hz / every 0.5 s |
+| Model | 82.8 KB dynamic-range INT8, 0.3 ms per inference (desktop CPU), 99.95 % argmax agreement with float |
+| Step counting on real walking / jogging / stairs (vs an independent gyroscope reference) | within 1 – 5 % |
+| Automated tests | 49 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
 
 ---
 
-## 🏗️ System Architecture
+## What changed in v2
+
+The dashboard showed `UNKNOWN / Confidence 0%` and barely updated. Investigation
+found three independent failures:
+
+**1. The model never loaded on the phone.** It was converted with a newer
+TensorFlow (it needs runtime ≥ 2.17: `FULLY_CONNECTED` op v12) while the app
+bundles `tensorflow-lite:2.16.1`. The interpreter failed at start-up and every
+window fell back to `UNKNOWN 0%`. The v1 "79/79 tests" ran on desktop TF (and on
+Python copies of the algorithms), so they could not catch it.
+*Fix:* the model is now converted with TF 2.16.1 and a test loads it in exactly
+the runtime version declared in `build.gradle.kts`.
+
+**2. The model could not have worked anyway.** It was trained on synthetic sine
+waves with gravity always on the Y axis. Loaded in a compatible runtime, a phone
+lying flat on a desk was classified **METRO at 100 %**, and a phone in a
+sideways pocket as CAR.
+*Fix:* retrained on real recordings from 54 people (see [Model](#model)) with
+subject-disjoint evaluation and random-rotation augmentation.
+
+**3. The pipeline was not real-time.**
+
+| v1 | v2 |
+|---|---|
+| Non-overlapping 128-sample windows: at most one update per 2.56 s | Sliding window, inference every 0.5 s, dashboard at 10 Hz |
+| "Adaptive sampling" dropped to ~5 Hz: one update per **25.6 s**, and a 50 Hz model cannot read 5 Hz walking | Always 50 Hz (the model's rate); energy saving via sensor-hub batching and a longer inference stride instead |
+| Raw events used as if exactly 50 Hz (phones deliver 50–60 Hz with jitter) | Timestamp-based resampler fuses accel + gyro onto an exact 50 Hz grid |
+| Posture, fidget and road detectors received **one sample per window** | Every detector processes every 50 Hz sample |
+| Sensor callbacks and inference on the main thread | Dedicated high-priority sensing thread |
+| UI state via implicit broadcasts; start/stop race ("SERVICE STOPPED" next to a STOP button) | In-process `StateFlow`; UI always shows current state |
+
+Other defects fixed:
+
+- **Steps:** v1 displayed `seconds × 2`. v2 uses the hardware step counter, falling back to a validated accelerometer detector.
+- **Fall detector:** v1 included the impact bounces in its immobility test, so it rejected real falls. It also auto-reset after 15 s because a motionless person reads ~1 g. v2 adds a settle window, a posture-change check, and a latched alert with an "I'm OK" action.
+- **Road detector:** v1 assumed the raw z-axis is vertical. v2 projects onto gravity, so it works in any orientation, and low-passes the signal to reject engine vibration.
+- **Transitions:** v1 showed the current time instead of the event time. v2 records each transition's own timestamp and debounces with hysteresis.
+- **Wellness score:** v1 truncated to whole minutes and never reset. v2 accumulates real elapsed time, resets daily and persists across restarts.
+- **Session start:** first samples no longer carry zero gyro values.
+
+### Vehicle contexts (BUS / CAR / METRO)
+
+v1's vehicle classes existed only in the synthetic generator; no real bus, car or
+metro IMU recordings were available to train on. v2 therefore detects
+**IN_VEHICLE** with Google Activity Recognition (a production-trained system) and
+uses it to gate road-hazard mapping. It cannot distinguish bus from car from
+metro. Collecting labelled transit recordings is the path to restoring those
+classes (see [Limitations](#limitations)).
+
+---
+
+## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                   COMMODITY SMARTPHONE (SCREEN OFF / POCKET)           │
-│                                                                        │
-│  ┌─────────────────────────┐          ┌─────────────────────────┐      │
-│  │ 3-Axis Accelerometer    │          │ 3-Axis Gyroscope        │      │
-│  │ [ax, ay, az]            │          │ [gx, gy, gz]            │      │
-│  └───────────┬─────────────┘          └───────────┬─────────────┘      │
-│              │                                    │                    │
-│              └──────────────────┬─────────────────┘                    │
-│                                 │ Synchronized 50 Hz Stream            │
-│                                 ▼                                      │
-│              ┌─────────────────────────────────────┐                   │
-│              │  128-Sample Sliding Window Buffer   │                   │
-│              │  (128 × 6 = 768 floats / 2.56 sec)  │                   │
-│              └──────────────────┬──────────────────┘                   │
-│                                 │                                      │
-│                                 ▼                                      │
-│              ┌─────────────────────────────────────┐                   │
-│              │     DeepSense TinyML Model          │                   │
-│              │     (Dual-Branch 1D-CNN + Fusion)   │                   │
-│              │     INT8 Quantized • 91.02 KB       │                   │
-│              │     Inference Latency: 0.20 ms      │                   │
-│              └──────────────────┬──────────────────┘                   │
-│                                 │ Softmax Probabilities                │
-│                                 ▼                                      │
-│           ┌──────────────────────────────────────────────┐             │
-│           │ 8 Classes: STILL, WALK, RUN, STAIRS_UP/DOWN, │             │
-│           │            BUS, CAR, METRO                   │             │
-│           └──────┬──────────────┬──────────────┬─────────┘             │
-│                  │              │              │                       │
-│     ┌────────────┘              │              └────────────┐          │
-│     ▼                           ▼                           ▼          │
-│ ┌──────────────┐         ┌──────────────┐         ┌──────────────┐     │
-│ │ Ergonomics   │         │ Transit &    │         │ Safety &     │     │
-│ │ & Posture    │         │ Road Surface │         │ Fall FSM     │     │
-│ ├──────────────┤         ├──────────────┤         ├──────────────┤     │
-│ │ • Gravity LPF│         │ • Vehicular  │         │ • Impact >   │     │
-│ │ • Thigh Tilt │         │   gating     │         │   3.2g       │     │
-│ │ • Fidget Var │         │ • Potholes   │         │ • 6s motion  │     │
-│ │ • Break Alert│         │ • Breakers   │         │   variance   │     │
-│ └──────┬───────┘         └──────┬───────┘         └──────┬───────┘     │
-│        │                        │                        │             │
-│        └────────────────┬───────┴────────────────────────┘             │
-│                         ▼                                              │
-│        ┌─────────────────────────────────────────────────┐             │
-│        │  Adaptive Engine & Composite Profiling          │             │
-│        ├─────────────────────────────────────────────────┤             │
-│        │  ⚡ Adaptive Sampling: 5 Hz ↔ 20 Hz ↔ 50 Hz      │             │
-│        │  🔄 Activity Transition Logging (with timestamp) │             │
-│        │  💚 Daily Wellness Score (0 - 100 Holistic)      │             │
-│        │  🔌 Sensor Abstraction (BLE Wearable Interface) │             │
-│        └────────────────────────┬────────────────────────┘             │
-│                                 │                                      │
-│              ┌──────────────────┴──────────────────┐                   │
-│              ▼                                     ▼                   │
-│  ┌─────────────────────────┐         ┌─────────────────────────┐       │
-│  │ Lockscreen Notification │         │ Live Dashboard Activity │       │
-│  │ (Ambient Updates)       │         │ (6 Real-time Cards)     │       │
-│  └─────────────────────────┘         └─────────────────────────┘       │
-└────────────────────────────────────────────────────────────────────────┘
+ Phone IMU (accel + gyro, ~50-60 Hz, jittered)      Google Activity Recognition
+            │  SensorEvent timestamps                        │ IN_VEHICLE confidence
+            ▼                                                ▼
+ ImuResampler ──► exact 50 Hz 6-channel stream ──► SensingEngine (pure Kotlin, sensing thread)
+                                                    │ every sample:  posture/fidget · fall FSM ·
+                                                    │                road shocks · step detector
+                                                    │ every 0.5 s:   DeepSense TFLite on last 2.56 s
+                                                    │                → smoothing + hysteresis
+                                                    │                → transitions · wellness · eco mode
+                                                    ▼
+                                    SensingRepository (StateFlow) ──► MainActivity (10 Hz)
+                                                    └──► notifications (status · fall alert · break)
 ```
 
----
+| File | Role |
+|---|---|
+| `ImuResampler.kt` | Fuses asynchronous accel/gyro events onto an exact 50 Hz grid; detects sensor stalls |
+| `ActivityStreaming.kt` | Sliding window; probability smoother with hysteresis; `ActivityClassifier` / `ImuSink` interfaces |
+| `SensingEngine.kt` | Orchestrates the whole pipeline; emits `SensingSnapshot`s. No Android types, fully unit-tested |
+| `DeepSenseClassifier.kt` | TFLite model; reads labels from assets; validates tensor shapes; reports load errors |
+| `ErgonomicPostureTracker.kt` | Tilt, fidget index (O(1) running variance), sedentary bouts & break prompts |
+| `FallDetector.kt` | Low-g → impact → settle → immobility + orientation change |
+| `RoadAnomalyDetector.kt` | Gravity-projected vertical shocks → potholes / speed breakers (vehicle only) |
+| `StepDetector.kt` | Orientation-independent pedometer (fallback for phones without a step counter) |
+| `WellnessScoreEngine.kt` | Daily score `0.3·Diversity + 0.3·Ergonomic + 0.2·Movement + 0.2·Safety` |
+| `SensingForegroundService.kt` | Sensing thread, eco batching, wake lock, notifications, persistence |
+| `SensorDataSource.kt` | `PhoneImuSource`; interface for adding wearable IMUs |
 
-## 🌟 The 8 Novelty Dimensions
-
-| # | Dimension | Technical Mechanism | Real-World Impact |
-|:---:|:---|:---|:---|
-| **1** | **Multi-Context Vehicular HAR** | Dual-branch Conv1D captures engine idle (12-16 Hz for Bus) vs smooth road noise (18-25 Hz for Car) vs rail clicks (4.2 Hz for Metro) | Distinguishes passive vehicular transport from active pedestrian locomotion. |
-| **2** | **Ergonomic Posture Profiling** | Gravity low-pass filter ($\alpha=0.85$) isolates static gravity $\rightarrow$ $\theta = \text{atan2}(g_y, g_z)$ computes thigh tilt | Detects forward slouching ($\theta < -25^\circ$) vs upright posture without external body cameras. |
-| **3** | **Fidget & Restlessness Index** | Dynamic acceleration variance: $\sigma^2(\lVert \vec{a} - \vec{g} \rVert)$ over a 4-second sliding window | Quantifies motor restlessness and leg shaking during lectures and sedentary desk work. |
-| **4** | **Smart Posture-Reset Sedentary Timer** | Continuous stationary timer that resets when user changes posture ($>15^\circ$ shift) or walks | Eliminates naive dumb timers; prompts breaks only when the user is truly statically frozen for 45 minutes. |
-| **5** | **Gated Road Anomaly Detector** | Conditionally enabled only during vehicular states; inspects Z-axis shockwaves ($\Delta z > 22 \text{ m/s}^2$ for potholes) | Crowdsources municipal road surface quality without false triggers from pedestrian footfalls. |
-| **6** | **Anti-False-Alarm Fall Guardian** | 3-state temporal finite state machine (Monitoring $\rightarrow$ Impact $\rightarrow$ Post-impact immobility evaluation) | Eliminates phone drop false alarms by checking post-impact motion variance over 6 seconds. |
-| **7** | **Adaptive Energy-Aware Sampling** | Context-driven frequency scaling: STILL (5 Hz) $\rightarrow$ WALK (20 Hz) $\rightarrow$ RUN/TRANSIT (50 Hz) | Conserves up to 90% battery life during sedentary periods while preserving high-fidelity dynamics. |
-| **8** | **Holistic Wellness Score & Abstraction** | Composite metric: $\text{Score} = 0.3D + 0.3E + 0.2M + 0.2S$ + extensible `SensorDataSource` interface | Translates raw physical kinematics into health actionable intelligence; wearable-ready for BLE earable/wrist devices. |
-
----
-
-## 🔬 TinyML Architecture
-
-The DeepSense neural network was modernised and trained specifically for constrained microcontroller/edge smartphone execution:
-
-* **Dual Input Branches:** Accelerometer $[128, 3]$ and Gyroscope $[128, 3]$.
-* **Feature Extraction:** Individual branches with Conv1D ($32$ filters, kernel size $5$ and $3$) with Batch Normalization.
-* **Sensor Fusion:** Cross-sensor Concatenation followed by Conv1D ($64$ filters, kernel $3$).
-* **Temporal Modeling:** Multi-scale Dilated Convolutions (dilation rates $1, 2, 4$) replacing recurrent GRU/LSTM layers to guarantee full TFLite hardware delegate compatibility and eliminate unaligned runtime memory leaks.
-* **Output:** GlobalAveragePooling1D $\rightarrow$ Dense($64$) $\rightarrow$ Dropout($0.2$) $\rightarrow$ Dense($8$, Softmax).
-* **Quantization:** Post-Training INT8 Dynamic Range Quantization yielding a footprint of **91.02 KB**.
+**Energy (eco) mode.** When the user has been STILL for 60 s and the dashboard is
+closed, inference slows from every 0.5 s to every 1.28 s and the sensors switch to
+FIFO batching. If the phone has wake-up accelerometer/gyroscope variants, the
+wake lock is released and the sensor hub wakes the CPU per batch. Sampling
+stays at 50 Hz because the model needs it. Opening the dashboard exits eco mode
+immediately. The energy saving has **not** been measured on hardware.
 
 ---
 
-## ⚡ Performance Benchmarks
+## Model
 
-| Metric | Target Requirement | PervasiveSense Measured | Status |
-|:---|:---:|:---:|:---:|
-| **Model Size** | $< 2.0 \text{ MB}$ | **91.02 KB** | 🚀 95% below target |
-| **Inference Latency** | $< 15.0 \text{ ms}$ | **0.20 ms** (on device CPU) | 🚀 75x faster |
-| **Validation Accuracy** | $> 90.0\%$ | **99.40%** | ✅ Exceeded |
-| **APK Binary Size** | $< 25.0 \text{ MB}$ | **19.81 MB** | ✅ Optimal |
-| **Sedentary Power Draw** | Lowest possible | **~90% sensor energy reduction** (at 5 Hz) | ⚡ Validated |
-| **Memory Footprint** | No memory leaks | Pre-allocated direct ByteBuffers reused | 🛡️ Verified |
+| | |
+|---|---|
+| Input | `float32 [1, 128, 6]` = 2.56 s at 50 Hz of (ax, ay, az m/s², gx, gy, gz rad/s), Android sensor conventions |
+| Output | softmax over `STILL, WALKING, RUNNING, STAIRS_UP, STAIRS_DOWN` (`assets/deepsense_labels.txt`) |
+| Architecture | Dual-branch (accel / gyro) 1-D CNN with in-graph rotation-invariant magnitude channels, dilated temporal convolutions; 61.8 k parameters |
+| Training data | [MotionSense](https://github.com/mmalekzadeh/motion-sense) (iPhone in trouser pocket, 24 subjects) + [UCI-HAR](https://archive.ics.uci.edu/dataset/240) (Android phone on waist, 30 subjects), both 50 Hz |
+| Evaluation | Subject-disjoint: 15 test subjects (6 MotionSense + the 9 official UCI test subjects) never seen in training |
+| Robustness | Each training window is rotated by a uniformly random 3-D rotation, applied identically to accel and gyro |
 
----
+Unit and sign conventions were verified, not assumed. The iOS-to-Android
+conversion `a = −g₀·(gravity + userAcceleration)` passes a rigid-body kinematics
+check `dĝ/dt = −ω × ĝ` with fitted sign +0.963 over 144 recordings, and the
+negative control (gyro sign flipped) gives −0.966.
 
-## 🧪 Verification & Testing
+| Test set (unseen subjects) | Accuracy | Macro-F1 |
+|---|---|---|
+| All, native orientation (TFLite INT8) | 97.37 % | 0.954 |
+| All, **random orientation** (TFLite INT8) | **97.33 %** | **0.954** |
+| MotionSense (pocket) | 96.98 % | 0.946 |
+| UCI-HAR (waist) | 98.54 % | 0.977 |
 
-PervasiveSense was validated across 5 independent verification suites comprising **79 test cases**:
+Full confusion matrices: `model/model_metrics.json`.
 
-* **TFLite Model Suite (9/9 Passed):** Model integrity, I/O tensors, softmax normalization, speed, NaN/Inf robustness, and determinism.
-* **Algorithm Verification (22/22 Passed):** Low-pass filter convergence, tilt math, fidget variance, debounce logic, and fall state transitions.
-* **APK Binary Inspection (12/12 Passed):** Manifest permissions, Android 14 service types, unaligned asset handling, native library symbols.
-* **Edge Case & Stress Tests (21/21 Passed):** Buffer overflow protection, extreme G-forces ($100g$), 24-hour sedentary timer bounds, state machine rapid switching.
-* **End-to-End Integration (15/15 Passed):** Simulated 6 real-world scenarios including morning bus commutes, 60-minute desk sessions, and phone drop rejections.
-
----
-
-## 📂 Repository Structure
-
-```
-DeepSense-MPC-/
-├── README.md                           <- Comprehensive project documentation
-├── release/
-│   └── PervasiveSense-debug.apk        <- Ready-to-install Android APK (19.81 MB)
-├── PervasiveSense/                     <- Android Gradle project
-│   ├── app/
-│   │   ├── src/main/
-│   │   │   ├── java/com/iitj/pervasivesense/
-│   │   │   │   ├── ActivityTransitionDetector.kt  <- Context transition logging
-│   │   │   │   ├── DeepSenseClassifier.kt         <- Safe in-memory TFLite wrapper
-│   │   │   │   ├── ErgonomicPostureTracker.kt     <- Slouch & fidget analysis
-│   │   │   │   ├── FallDetector.kt                <- 3-state anti-false-alarm FSM
-│   │   │   │   ├── MainActivity.kt                <- 6-card dashboard UI
-│   │   │   │   ├── RoadAnomalyDetector.kt         <- Z-axis pothole shock detector
-│   │   │   │   ├── SensingForegroundService.kt    <- 24/7 background sensing engine
-│   │   │   │   ├── SensorDataSource.kt            <- BLE wearable sensor abstraction
-│   │   │   │   └── WellnessScoreEngine.kt         <- Composite daily health scoring
-│   │   │   ├── assets/
-│   │   │   │   └── deepsense_int8.tflite          <- 91 KB edge neural network
-│   │   │   └── res/layout/activity_main.xml       <- Dashboard UI layout
-│   │   └── build.gradle.kts
-│   ├── build.gradle.kts
-│   └── settings.gradle.kts
-├── model/
-│   ├── train_export_deepsense.py       <- Model architecture, training & TFLite export
-│   └── deepsense_int8.tflite          <- Quantized model binary
-├── tests/
-│   ├── test_algorithms.py              <- Mathematical verification of algorithms
-│   ├── test_apk_inspection.py          <- Binary structural checks
-│   ├── test_edge_cases.py              <- Stress and boundary condition tests
-│   ├── test_integration.py             <- 6 end-to-end real world simulation tests
-│   └── test_tflite_model.py            <- Model performance and accuracy tests
-└── docs/
-    ├── PROJECT_PROPOSAL_SUCHETANA_MAAM.md  <- Formal academic proposal
-    ├── final_test_report.md            <- Complete 79-test verification log
-    ├── testing_guide.md                <- Field testing manual with real-world scenarios
-    ├── project_explanation.md          <- Exhaustive architectural walkthrough
-    ├── hinglish_explanation.md         <- Intuitive bilingual explanation
-    └── novelty_enhancement_plan.md     <- Academic research alignment strategy
-```
-
----
-
-## 🚀 Quickstart & Installation
-
-### Option 1: Direct APK Installation (Fastest)
-1. Download `PervasiveSense-debug.apk` directly from the [`release/`](release/PervasiveSense-debug.apk) directory.
-2. Transfer to an Android phone running Android 8.0 or higher.
-3. Tap the file to install (allow *"Install from unknown sources"* if prompted).
-4. Launch the app, grant Activity Recognition and Notification permissions, and press **START PERVASIVE SENSING**.
-
-### Option 2: Build From Source
+Retrain:
 ```bash
-# Clone the repository
-git clone https://github.com/Saurav-Gupta-9741/DeepSense-MPC-.git
-cd DeepSense-MPC-/PervasiveSense
-
-# Assemble debug APK using Gradle wrapper
-./gradlew assembleDebug
+pip install "tensorflow==2.16.1" "keras==3.3.3"
+python model/train_export_deepsense.py --motionsense <motion-sense/data> --uci "<UCI HAR Dataset>"
+cp model/deepsense_int8.tflite model/deepsense_labels.txt PervasiveSense/app/src/main/assets/
 ```
-The output APK will be generated at `app/build/outputs/apk/debug/app-debug.apk`.
+The TensorFlow version must match `org.tensorflow:tensorflow-lite` in `app/build.gradle.kts`.
 
 ---
 
-## 📚 Academic References
+## Testing
 
-1. **Yao, S., Hu, S., Zhao, Y., Zhang, A., & Abdelzaher, T.** (2017). *DeepSense: A unified deep learning framework for time-series mobile sensing data processing*. In Proceedings of the 26th International Conference on World Wide Web (WWW '17), pp. 351–360.
-2. **Chakraborty, S. et al.** (2026). *WristSense: Sensing Hidden Wrist Strain in Routine Activities via Inertial Tokenization and LLM-Based Feedback*.
-3. **Chakraborty, S. et al.** (2026). *SpineSense: Earable-Based Inertial Sensing for Spine Movement Monitoring to Combat Neck Pain*. In Proc. ACM Hum.-Comput. Interact. (PACMHCI / EICS 2026).
-4. **Chakraborty, S. et al.** (2025). *BiteSense: Earable-Based Inertial Sensing for Eating Behaviour Assessment*. In IEEE International Conference on Pervasive Computing and Communications (PerCom 2025).
-5. **Chakraborty, S. et al.** (2025). *ReMEC: Reliability-aware scheduling of mixed-criticality IoT tasks in DVFS-enabled Multi-tier Edge Computing*. Future Generation Computer Systems.
+See [`docs/TESTING.md`](docs/TESTING.md) for what each test proves.
+
+**1. Engine: 49 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
+real Kotlin code, mostly by replaying real MotionSense recordings delivered like
+a phone does: separate accel/gyro streams at 57.3 / 48.7 Hz with ±2 ms jitter.
+```bash
+cd PervasiveSense && ./gradlew :app:testDebugUnitTest
+```
+
+**2. Model: 24 tests** in the app's TFLite runtime (`tests/test_tflite_model.py`).
+```bash
+pip install "tensorflow==2.16.1" "keras==3.3.3" pytest
+MOTIONSENSE_DIR=<motion-sense/data> UCI_DIR="<UCI HAR Dataset>" pytest -v tests/test_tflite_model.py
+```
+Without the dataset variables, the 16 tests that need no data still run (runtime
+compatibility, asset integrity, I/O contract, robustness, resting phone in any
+orientation). The 8 data-dependent tests are skipped with a reason.
+
+**Negative controls.** The model suite fails the v1 model three independent ways,
+including the exact on-device error. The resampler, step and latency tests were
+checked against deliberately broken inputs.
 
 ---
 
-## 📄 License
-This project is open-source under the academic research guidelines of IIT Jodhpur for educational and peer-review purposes.
+## Build & run
+
+Requirements: Android Studio (Koala or newer) or JDK 17, Android SDK 34.
+
+```bash
+cd PervasiveSense
+./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
+./gradlew installDebug       # onto a connected device
+```
+
+On first start the app asks for **Notifications** and **Physical activity**
+permissions. Physical activity is required on Android 14+ (the "health"
+foreground-service type) and enables vehicle detection and the hardware step
+counter.
+
+Checking it is live: open the app and tap **Start**. The status shows
+*WARMING UP* for 2.56 s, then the context. Pick the phone up and walk:
+*WALKING* appears within about 2–3 s, the class probabilities and IMU values
+update 10 times per second, and the engine line shows the device's real sensor
+rate and the inference time.
+
+---
+
+## Repository structure
+
+```
+PervasiveSense/                 Android app (Kotlin, minSdk 26, targetSdk 34)
+  app/src/main/java/...          sources (table above)
+  app/src/main/assets/           deepsense_int8.tflite, deepsense_labels.txt
+  app/src/test/                  49 JVM tests + real-data fixtures (MotionSense excerpts)
+model/
+  har_datasets.py                dataset loaders -> Android units, frame verification
+  train_export_deepsense.py      training + TF 2.16.1 export + evaluation
+  export_test_fixtures.py        builds the JVM test fixtures + independent cadence reference
+  deepsense_int8.tflite          model (identical to the app asset; a test enforces this)
+  model_metrics.json             held-out metrics and confusion matrices
+tests/test_tflite_model.py      model validation in the app's runtime
+docs/                           testing guide; v1 design notes (historical)
+```
+
+---
+
+## Limitations
+
+- **Vehicle subtype.** Only IN_VEHICLE is detected (via Google Play services); bus/car/metro need labelled real recordings. On phones without Play services, vehicle detection and road-hazard mapping are unavailable, and the dashboard says so.
+- **Falls.** Validated on physics-based scenarios plus zero false alarms on real daily activities. No labelled real fall recordings were available. A dropped phone that lies still can resemble a fall.
+- **Road anomalies.** Thresholds follow published smartphone road-sensing magnitudes and are validated on constructed shock profiles. They should be calibrated with real drives.
+- **Posture.** Tilt semantics assume a trouser pocket while seated.
+- **Energy.** Eco mode is implemented but its battery saving has not been measured.
+- **Training data** covers two phone placements (pocket, waist); a phone held in the hand is less represented.
+
+## Credits
+
+MotionSense: Malekzadeh et al., *Mobile Sensor Data Anonymization*, IoTDI 2019.
+UCI-HAR: Anguita et al., *A Public Domain Dataset for Human Activity Recognition Using Smartphones*, ESANN 2013.

@@ -1,3 +1,5 @@
+> **Historical (v1) document.** It describes the original design, including the synthetic-data BUS/CAR/METRO model, 5 Hz adaptive sampling and accuracy/energy figures that did not hold on real devices. For the current design and measured results see the [README](../README.md#what-changed-in-v2) and [TESTING.md](TESTING.md).
+
 # Academic Project Proposal & Problem Statement
 ## Course: Mobile & Pervasive Computing
 **Department of Computer Science & Engineering, IIT Jodhpur**

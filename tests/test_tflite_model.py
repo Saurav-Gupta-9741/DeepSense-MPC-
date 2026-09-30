@@ -1,173 +1,249 @@
+"""
+Validation of the on-device DeepSense model exactly as the Android app uses it.
+
+    pip install "tensorflow==2.16.1" "keras==3.3.3" pytest
+    MOTIONSENSE_DIR=<dir> UCI_DIR=<dir> pytest -v tests/test_tflite_model.py
+
+Tests needing the datasets are skipped (with a reason) if the env vars are unset.
+
+What this suite guarantees (each item was a real failure of the previous model):
+  * the model loads in the SAME TFLite runtime version the APK bundles;
+  * the asset in the APK is byte-identical to the validated model and the label
+    file matches the output tensor;
+  * a phone lying still in ANY orientation is STILL (the old model said METRO);
+  * accuracy is measured on people never seen in training, in random orientations;
+  * the full streaming path (0.5 s stride + smoothing, mirrored from
+    ActivityStreaming.kt) reacts to real activity changes within seconds.
+"""
+import hashlib
 import os
+import re
+import sys
 import time
+
 import numpy as np
+import pytest
 import tensorflow as tf
 
-MODEL_PATH = r"e:\GenAI-part2-Rag-implementation-main\PervasiveSense_Model\deepsense_int8.tflite"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "model"))
+from har_datasets import (CLASS_NAMES, load_motionsense, load_motionsense_streams,  # noqa: E402
+                          load_uci)
+from train_export_deepsense import (MS_TEST, UCI_TEST, random_rotations,  # noqa: E402
+                                    rotate)
 
-def print_result(test_name, passed, details=""):
-    status = "PASS" if passed else "FAIL"
-    print(f"[{status}] {test_name}")
-    if details:
-        print(f"       {details}")
+MODEL = os.path.join(ROOT, "model", "deepsense_int8.tflite")
+ASSET = os.path.join(ROOT, "PervasiveSense", "app", "src", "main", "assets", "deepsense_int8.tflite")
+LABELS = os.path.join(ROOT, "PervasiveSense", "app", "src", "main", "assets", "deepsense_labels.txt")
+GRADLE = os.path.join(ROOT, "PervasiveSense", "app", "build.gradle.kts")
+MS_DIR, UCI_DIR = os.environ.get("MOTIONSENSE_DIR"), os.environ.get("UCI_DIR")
+needs_ms = pytest.mark.skipif(not MS_DIR, reason="set MOTIONSENSE_DIR to run real-data tests")
 
-def run_tests():
-    print("Starting TFLite Model Testing Suite...")
-    
-    # 9. Verify model file size
-    try:
-        file_size = os.path.getsize(MODEL_PATH)
-        is_reasonable = 10 * 1024 < file_size < 100 * 1024 * 1024 # 10KB to 100MB
-        print_result("Model File Size Check", is_reasonable, f"Size: {file_size / 1024:.2f} KB")
-    except Exception as e:
-        print_result("Model File Size Check", False, str(e))
-        return
 
-    # 1. Load model and verify shapes
-    try:
-        interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
-        interpreter.allocate_tensors()
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
-        
-        expected_in_shape = [1, 128, 6]
-        expected_out_shape = [1, 8]
-        
-        in_shape_match = list(input_details[0]['shape']) == expected_in_shape
-        out_shape_match = list(output_details[0]['shape']) == expected_out_shape
-        
-        print_result("Load Model & Shape Check", in_shape_match and out_shape_match, 
-                     f"In: {input_details[0]['shape']}, Out: {output_details[0]['shape']}")
-        
-        input_index = input_details[0]['index']
-        output_index = output_details[0]['index']
-        input_dtype = input_details[0]['dtype']
-        output_dtype = output_details[0]['dtype']
-        
-        # Determine if quantization requires scaling
-        in_scale, in_zero_point = input_details[0]['quantization']
-        out_scale, out_zero_point = output_details[0]['quantization']
-        
-    except Exception as e:
-        print_result("Load Model & Shape Check", False, str(e))
-        return
+def app_tflite_version():
+    return re.search(r'org\.tensorflow:tensorflow-lite:([0-9.]+)"', open(GRADLE).read()).group(1)
 
-    def run_inference(data_float32):
-        if input_dtype == np.int8:
-            input_data = (data_float32 / in_scale + in_zero_point).astype(np.int8)
+
+class Model:
+    def __init__(self, path=MODEL):
+        self.it = tf.lite.Interpreter(model_path=path)
+        self.it.allocate_tensors()
+        self.inp = self.it.get_input_details()[0]
+        self.out = self.it.get_output_details()[0]
+
+    def __call__(self, windows):
+        windows = np.asarray(windows, np.float32).reshape(-1, 128, 6)
+        res = np.empty((len(windows), self.out["shape"][-1]), np.float32)
+        for k, w in enumerate(windows):
+            self.it.set_tensor(self.inp["index"], w[None])
+            self.it.invoke()
+            res[k] = self.it.get_tensor(self.out["index"])[0]
+        return res
+
+
+@pytest.fixture(scope="module")
+def model():
+    return Model()
+
+
+# ------------------------------------------------------------ deployment contract
+def test_runtime_matches_the_version_bundled_in_the_apk():
+    app = app_tflite_version()
+    assert tf.__version__.split(".")[:2] == app.split(".")[:2], (
+        f"run this suite with TF {app} (found {tf.__version__}); the model must load in the "
+        "runtime the APK ships")
+
+
+def test_model_loads_in_app_runtime(model):
+    # The previous model failed right here: "FULLY_CONNECTED version 12" needs runtime >= 2.17.
+    assert model.inp["dtype"] == np.float32
+
+
+def test_min_runtime_version_metadata_is_compatible():
+    from tensorflow.lite.python import schema_py_generated as s
+    m = s.Model.GetRootAsModel(open(MODEL, "rb").read(), 0)
+    app = tuple(int(v) for v in app_tflite_version().split("."))
+    found = False
+    for i in range(m.MetadataLength()):
+        if m.Metadata(i).Name() == b"min_runtime_version":
+            raw = m.Buffers(m.Metadata(i).Buffer()).DataAsNumpy().tobytes().rstrip(b"\x00").decode()
+            need = tuple(int(v) for v in raw.split("."))
+            assert need <= app, f"model needs TFLite {raw}, app bundles {app}"
+            found = True
+    assert found
+
+
+def test_apk_asset_is_the_validated_model():
+    digest = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+    assert digest(MODEL) == digest(ASSET)
+
+
+def test_io_shapes_and_labels_file(model):
+    labels = [line.strip() for line in open(LABELS) if line.strip()]
+    assert list(model.inp["shape"]) == [1, 128, 6]
+    assert list(model.out["shape"]) == [1, len(labels)]
+    assert labels == CLASS_NAMES
+
+
+def test_row_major_packing_matches_kotlin_contract(model):
+    # Kotlin packs window[t * 6 + c]; numpy C-order reshape of [128, 6] is the same layout.
+    w = np.random.default_rng(0).normal(0, 3, (128, 6)).astype(np.float32)
+    flat = np.array([w[t, c] for t in range(128) for c in range(6)], np.float32)
+    np.testing.assert_allclose(model(flat.reshape(128, 6)), model(w), atol=1e-6)
+
+
+# ------------------------------------------------------------ numerical robustness
+def test_softmax_valid_deterministic_and_finite_on_extreme_input(model):
+    rng = np.random.default_rng(1)
+    cases = [np.zeros((128, 6)), np.full((128, 6), 78.0), rng.normal(0, 40, (128, 6)),
+             np.tile([0, 0, 9.81, 0, 0, 0], (128, 1))]
+    for w in cases:
+        p1, p2 = model(w)[0], model(w)[0]
+        assert np.all(np.isfinite(p1))
+        assert abs(p1.sum() - 1) < 1e-4
+        np.testing.assert_array_equal(p1, p2)
+
+
+def test_inference_is_fast(model):
+    w = np.random.default_rng(2).normal(0, 1, (1, 128, 6)).astype(np.float32)
+    model(w)
+    t0 = time.perf_counter()
+    for _ in range(200):
+        model(w)
+    ms = (time.perf_counter() - t0) / 200 * 1000
+    print(f"desktop CPU inference: {ms:.3f} ms")
+    assert ms < 15  # the app runs one inference per 0.5 s
+
+
+# ------------------------------------------------------------ physics sanity
+@pytest.mark.parametrize("gravity", [
+    (0, 0, 9.81), (0, 0, -9.81), (0, 9.81, 0), (0, -9.81, 0), (9.81, 0, 0), (-9.81, 0, 0),
+    (0.06, 5.04, 8.23),  # the exact reading in the bug report screenshot (old model: METRO 100 %)
+])
+def test_phone_resting_in_any_orientation_is_still(model, gravity):
+    rng = np.random.default_rng(3)
+    w = np.zeros((128, 6))
+    w[:, :3] = np.array(gravity) / np.linalg.norm(gravity) * 9.81
+    w[:, :3] += rng.normal(0, 0.03, (128, 3))
+    w[:, 3:] += rng.normal(0, 0.005, (128, 3))
+    p = model(w)[0]
+    assert CLASS_NAMES[p.argmax()] == "STILL" and p.max() > 0.9, dict(zip(CLASS_NAMES, p.round(3)))
+
+
+def test_random_resting_orientations_are_still(model):
+    rng = np.random.default_rng(4)
+    w = np.zeros((50, 128, 6))
+    w[:, :, 2] = 9.81
+    w = rotate(w, random_rotations(50, rng))
+    w = w + np.concatenate([rng.normal(0, 0.03, (50, 128, 3)), rng.normal(0, 0.005, (50, 128, 3))], -1)
+    assert np.mean(model(w).argmax(1) == 0) == 1.0
+
+
+# ------------------------------------------------------------ real held-out subjects
+@pytest.fixture(scope="module")
+def heldout():
+    xs, ys = [], []
+    if MS_DIR:
+        x, y, s = load_motionsense(MS_DIR, stride=64)
+        keep = np.isin(s, list(MS_TEST))
+        xs.append(x[keep]); ys.append(y[keep])
+    if UCI_DIR:
+        x, y, s = load_uci(UCI_DIR)
+        keep = np.isin(s, list(UCI_TEST))
+        xs.append(x[keep]); ys.append(y[keep])
+    if not xs:
+        pytest.skip("set MOTIONSENSE_DIR and/or UCI_DIR")
+    return np.concatenate(xs), np.concatenate(ys)
+
+
+def test_accuracy_on_unseen_subjects_in_random_orientations(model, heldout):
+    x, y = heldout
+    xr = rotate(x, random_rotations(len(x), np.random.default_rng(5))).astype(np.float32)
+    pred = model(xr).argmax(1)
+    acc = (pred == y).mean()
+    f1 = []
+    for c in range(len(CLASS_NAMES)):
+        if (y == c).any():
+            tp = ((pred == c) & (y == c)).sum()
+            f1.append(2 * tp / ((pred == c).sum() + (y == c).sum()))
+    print(f"held-out accuracy {acc*100:.2f}% | macro-F1 {np.mean(f1):.3f} | per-class F1 "
+          f"{dict(zip(CLASS_NAMES, np.round(f1, 3)))} | n={len(y)}")
+    assert acc >= 0.95
+    assert min(f1) >= 0.85
+
+
+def test_predictions_are_orientation_invariant(model, heldout):
+    x, _ = heldout
+    x = x[:: max(1, len(x) // 600)]
+    base = model(x).argmax(1)
+    agree = [np.mean(model(rotate(x, random_rotations(len(x), np.random.default_rng(k)))).argmax(1) == base)
+             for k in range(5)]
+    print("agreement under random re-orientation:", np.round(agree, 3))
+    assert min(agree) >= 0.93
+
+
+# ------------------------------------------------------------ streaming behaviour
+def stream_labels(model, stream, stride=25, alpha=0.5, enter=0.5, confirm=2):
+    """Mirror of SlidingWindow + ActivitySmoother (ActivityStreaming.kt) at 50 Hz."""
+    smoothed, stable, pending, hits, out = None, -1, -1, 0, []
+    for end in range(128, len(stream) + 1, stride):
+        p = model(stream[end - 128:end])[0]
+        smoothed = p if smoothed is None else alpha * p + (1 - alpha) * smoothed
+        best = int(smoothed.argmax())
+        if best == stable or smoothed[best] < enter:
+            pending, hits = -1, 0
+        elif stable < 0:
+            stable = best
         else:
-            input_data = data_float32.astype(input_dtype)
-            
-        interpreter.set_tensor(input_index, input_data)
-        interpreter.invoke()
-        output_data = interpreter.get_tensor(output_index)
-        
-        if output_dtype == np.int8:
-            output_data = (output_data.astype(np.float32) - out_zero_point) * out_scale
-            
-        return output_data
+            hits = hits + 1 if best == pending else 1
+            pending = best
+            if hits >= confirm:
+                stable, pending, hits = best, -1, 0
+        out.append((end / 50.0, stable))
+    return out
 
-    # 7. Softmax Validity Helper
-    def check_softmax(probs):
-        total = np.sum(probs)
-        return np.isclose(total, 1.0, atol=1e-2), total
 
-    # 3. Test ZERO input
-    try:
-        zero_input = np.zeros(expected_in_shape, dtype=np.float32)
-        zero_out = run_inference(zero_input)
-        pred_class = np.argmax(zero_out[0])
-        valid_softmax, total = check_softmax(zero_out[0])
-        
-        print_result("ZERO Input Test", pred_class == 0 and valid_softmax, 
-                     f"Predicted Class: {pred_class} (Expected: 0), Sum: {total:.4f}")
-    except Exception as e:
-        print_result("ZERO Input Test", False, str(e))
-
-    # 4. Test RANDOM NOISE
-    try:
-        random_input = np.random.randn(*expected_in_shape).astype(np.float32)
-        random_out = run_inference(random_input)
-        valid_softmax, total = check_softmax(random_out[0])
-        
-        print_result("RANDOM NOISE Test", valid_softmax, f"Sum of probabilities: {total:.4f}")
-    except Exception as e:
-        print_result("RANDOM NOISE Test", False, str(e))
-
-    # 5. Test EXTREME values
-    try:
-        extreme_input = np.ones(expected_in_shape, dtype=np.float32) * 1e6
-        extreme_out = run_inference(extreme_input)
-        valid_softmax, total = check_softmax(extreme_out[0])
-        
-        negative_extreme = np.ones(expected_in_shape, dtype=np.float32) * -1e6
-        neg_ext_out = run_inference(negative_extreme)
-        
-        print_result("EXTREME Values Test", True, "No crash on extreme positive/negative inputs")
-    except Exception as e:
-        print_result("EXTREME Values Test", False, str(e))
-
-    # 6. Test NaN and Inf
-    try:
-        nan_input = np.full(expected_in_shape, np.nan, dtype=np.float32)
-        nan_out = run_inference(nan_input)
-        
-        inf_input = np.full(expected_in_shape, np.inf, dtype=np.float32)
-        inf_out = run_inference(inf_input)
-        
-        print_result("NaN and Inf Test", True, "No crash on NaN/Inf inputs")
-    except Exception as e:
-        print_result("NaN and Inf Test", False, str(e))
-
-    # 10. Batch Consistency (Determinism)
-    try:
-        test_input = np.random.randn(*expected_in_shape).astype(np.float32)
-        out1 = run_inference(test_input)
-        out2 = run_inference(test_input)
-        is_consistent = np.allclose(out1, out2)
-        print_result("Determinism Test", is_consistent)
-    except Exception as e:
-        print_result("Determinism Test", False, str(e))
-
-    # 2. Test 8 Classes with synthetic data (dummy check to see if it predicts something)
-    try:
-        # Just generating some synthetic patterns to see if predictions vary or sum to 1
-        all_passed = True
-        for i in range(8):
-            # Synthetic sine wave pattern
-            t = np.linspace(0, 10, 128)
-            freq = (i + 1) * 2
-            synth = np.sin(t * freq)[:, None] * np.ones((1, 6))
-            synth_input = synth.reshape(1, 128, 6).astype(np.float32)
-            
-            out = run_inference(synth_input)
-            valid_softmax, total = check_softmax(out[0])
-            if not valid_softmax:
-                all_passed = False
-                print_result(f"Synthetic Class {i} Test", False, f"Invalid softmax sum: {total:.4f}")
-                
-        print_result("Synthetic Data 8-Class Test", all_passed, "Evaluated softmax validity for diverse inputs")
-    except Exception as e:
-        print_result("Synthetic Data 8-Class Test", False, str(e))
-
-    # 8. Inference Speed
-    try:
-        speed_input = np.random.randn(*expected_in_shape).astype(np.float32)
-        
-        # Warmup
-        for _ in range(10):
-            run_inference(speed_input)
-            
-        start_time = time.time()
-        num_inferences = 100
-        for _ in range(num_inferences):
-            run_inference(speed_input)
-        end_time = time.time()
-        
-        avg_time_ms = (end_time - start_time) / num_inferences * 1000
-        print_result("Inference Speed Test", True, f"Average time over 100 runs: {avg_time_ms:.2f} ms")
-    except Exception as e:
-        print_result("Inference Speed Test", False, str(e))
-
-if __name__ == "__main__":
-    run_tests()
+@needs_ms
+@pytest.mark.parametrize("subject", sorted(MS_TEST))
+def test_real_continuous_session_reacts_within_seconds(model, subject):
+    """Held-out subject: sit -> walk -> sit -> jog, stitched from their own recordings."""
+    parts = {}
+    for sub, label, x in load_motionsense_streams(MS_DIR):
+        if sub == subject and label not in parts and len(x) >= 1000:
+            parts[label] = x[:1000]  # 20 s each
+    order = [0, 1, 0, 2]
+    stream = np.concatenate([parts[k] for k in order]).astype(np.float32)
+    stream = rotate(stream[None], random_rotations(1, np.random.default_rng(subject)))[0].astype(np.float32)
+    labels = stream_labels(model, stream)
+    latencies = []
+    for seg, cls in enumerate(order[1:], start=1):
+        change = seg * 20.0
+        first = next((t for t, s in labels if t >= change and s == cls), None)
+        assert first is not None, f"never switched to {CLASS_NAMES[cls]}"
+        latencies.append(first - change)
+    print(f"subject {subject} switch latencies (s):", [round(v, 2) for v in latencies])
+    assert max(latencies) <= 4.0
+    # Once settled (4 s into each segment) the stable label is correct >= 95 % of the time.
+    settled = [(t, s) for t, s in labels if (t % 20.0) >= 4.0]
+    correct = [s == order[min(int(t // 20.0), 3)] for t, s in settled]
+    assert np.mean(correct) >= 0.95, f"settled accuracy {np.mean(correct):.3f}"
