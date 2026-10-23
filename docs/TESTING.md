@@ -4,7 +4,7 @@ Two suites cover the two halves of the system. Neither re-implements app code
 in another language: the JVM suite runs the real Kotlin engine, and the model
 suite runs the real `.tflite` file in the TFLite version the APK bundles.
 
-## 1. Sensing engine — 49 JVM tests
+## 1. Sensing engine — 82 JVM tests
 
 ```bash
 cd PervasiveSense
@@ -29,6 +29,11 @@ accelerometer and gyroscope as separate streams at 57.3 Hz and 48.7 Hz with
 | `RoadAnomalyDetectorTest` | 6 | Pothole and speed breaker detected in 3 phone orientations; 30 s of cabin vibration produces nothing; gated off outside vehicles (incl. real walking); one shock counted once |
 | `WellnessScoreEngineTest` | 2 | Composite formula and components; day rollover; state round-trip |
 | `ActivityTransitionDetectorTest` | 1 | Only changes are logged, each with its own timestamp |
+| `GaitSegmentExtractorTest` | 5 | Fit-to-drive gait features: cadence within 8 % of an independent gyroscope reference; healthy stride CV < 5 %; identical under 3 phone rotations; nothing while not walking or interrupted; no-gyroscope fallback; impairment moves every feature the expected way |
+| `GaitBaselineTest` | 4 | Thresholds are percentiles of the user's own walks; one-sided scoring; median walk score; daily quota and capacity |
+| `FitToDriveMonitorTest` | 21 | Held-out real session normal, impaired walk large gap; quarantine (a flagged walk is never learned); triggers (trip, car Bluetooth, manual wait/give-up); disabled = nothing learned; restart; balance test vs personal reference, moved, expiry. Drunk-driving scenarios: slightly unusual walk before driving → balance offer, never learned; found only while driving → no prompt; driving after a warning → reminder, walk never learned; no balance test in a moving vehicle; implausible "normal balance" rejected; study session learns nothing; walks with the phone in the hand ignored |
+| `FitToDriveEngineTest` | 2 | Fit-to-drive end to end through the real-time pipeline (incl. no balance test in the car); proximity sensor decides pocket walks |
+| `FitToDriveEvaluationTest` | 1 | **All 24 MotionSense people** (needs `MOTIONSENSE_DIR`; CI downloads it): baseline from 2 walking sessions, scored on the held-out 3rd. Sober large gap 1/24; simulated strong impairment 24/24, mild flagged 23/24. See `docs/FIT_TO_DRIVE.md` |
 | `SensingEngineTest` | 9 | End-to-end: real sit→walk→stand stream, first decision ≤ 2.7 s, STILL→WALKING 1.54 s, pipeline adds ≤ 2 inferences, 0.5 s inference cadence, 10 Hz dashboard, correct wellness time and steps; chronological window contract; **model failure surfaces as MODEL_ERROR** (the v1 bug showed a silent UNKNOWN 0 %); eco mode only when still and unobserved; sensor outage never credited; vehicle context and expiry; hardware step deltas incl. reboot; midnight rollover; phones without gyroscope |
 
 The stand-in classifier in `SensingEngineTest` (motion energy of the window)

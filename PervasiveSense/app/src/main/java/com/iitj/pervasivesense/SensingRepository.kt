@@ -30,9 +30,17 @@ object SensingRepository {
         fun setUiVisible(visible: Boolean)
         fun acknowledgeFall()
         fun onVehicleConfidence(confidence: Int)
+        fun setFitToDriveEnabled(enabled: Boolean)
+        fun refreshFitSettings()
+        fun requestFitCheck()
+        fun startBalanceTest(purpose: BalancePurpose)
+        fun cancelBalanceTest()
+        fun dismissFitAdvice()
+        fun resetFitToDrive()
     }
 
     @Volatile private var controller: Controller? = null
+    private var visibleScreens = 0
     @Volatile var uiVisible: Boolean = false
         private set
 
@@ -49,12 +57,29 @@ object SensingRepository {
     internal fun publish(s: SensingSnapshot) { _snapshot.value = s }
     internal fun setMessage(m: String?) { _message.value = m }
 
+    /**
+     * Each screen reports onStart/onStop. Counted, because when one screen opens
+     * another the new one starts before the old one stops.
+     */
+    @Synchronized
     fun setUiVisible(visible: Boolean) {
-        uiVisible = visible
-        controller?.setUiVisible(visible)
+        visibleScreens = (visibleScreens + if (visible) 1 else -1).coerceAtLeast(0)
+        val now = visibleScreens > 0
+        if (now == uiVisible) return
+        uiVisible = now
+        controller?.setUiVisible(now)
     }
 
     fun acknowledgeFall() { controller?.acknowledgeFall() }
 
     fun deliverVehicleConfidence(confidence: Int) { controller?.onVehicleConfidence(confidence) }
+
+    // Fit-to-drive check
+    fun setFitToDriveEnabled(enabled: Boolean) { controller?.setFitToDriveEnabled(enabled) }
+    fun refreshFitSettings() { controller?.refreshFitSettings() }
+    fun requestFitCheck() { controller?.requestFitCheck() }
+    fun startBalanceTest(purpose: BalancePurpose) { controller?.startBalanceTest(purpose) }
+    fun cancelBalanceTest() { controller?.cancelBalanceTest() }
+    fun dismissFitAdvice() { controller?.dismissFitAdvice() }
+    fun resetFitToDrive() { controller?.resetFitToDrive() }
 }

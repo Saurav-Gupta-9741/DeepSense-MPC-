@@ -7,8 +7,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.Sensor
@@ -25,6 +29,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import com.google.android.gms.location.ActivityRecognition
 import org.json.JSONObject
 import java.time.Instant
@@ -44,6 +49,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         const val NOTIFICATION_ID = 1001
         const val FALL_NOTIFICATION_ID = 1002
         const val BREAK_NOTIFICATION_ID = 1003
+        const val FIT_NOTIFICATION_ID = 1004
         const val ACTION_STOP = "com.iitj.pervasivesense.action.STOP"
         private const val PREFS = "pervasivesense_daily"
         private const val WAKELOCK_TIMEOUT_MS = 10 * 60 * 1000L
@@ -55,6 +61,12 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         fun hasActivityRecognitionPermission(context: Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
+                PackageManager.PERMISSION_GRANTED
+
+        /** Needed to see car Bluetooth connections (runtime permission on Android 12+). */
+        fun hasBluetoothPermission(context: Context): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
     }
 
@@ -75,6 +87,31 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     private var lastSaveT = Long.MIN_VALUE
     private var lastWakeRenewT = Long.MIN_VALUE
     private var started = false
+    private var fitDirty = false
+    private var carReceiverRegistered = false
+    private var proximityRegistered = false
+    private var studyCondition = StudyCondition.OFF
+    private var studyParticipant = ""
+
+    /** Covered proximity sensor = phone in a pocket: only pocket walks are compared with the pocket baseline. */
+    private val proximityListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            engine?.onProximity(event.values[0] < event.sensor.maximumRange)
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    /** A car audio / hands-free unit connected: the user is probably about to drive. */
+    private val carBluetoothReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission") // registered only with the permission
+        override fun onReceive(context: Context, intent: Intent) {
+            val device = IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            val cls = try { device?.bluetoothClass?.deviceClass } catch (e: SecurityException) { null }
+            if (cls == BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO || cls == BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE) {
+                engine?.onCarBluetoothConnected()
+            }
+        }
+    }
 
     private val stepListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -153,7 +190,10 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             hasGyroscope = source.hasGyroscope
         )
         loadDailyState()?.let { e.wellness.restore(it) }
+        FitToDriveStore.load(this)?.let { e.fitToDrive.restore(it) }
+        e.setFitToDriveEnabled(FitToDriveStore.isEnabled(this))
         engine = e
+        loadStudySettings()
 
         val sink = object : ImuSink {
             override fun onAccelerometer(tNanos: Long, x: Float, y: Float, z: Float) {
@@ -170,6 +210,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         }
         startHardwareStepCounter(e)
         startVehicleDetection(e)
+        updateFitSensors()
         updateWakeLock()
         SensingRepository.attach(this)
         SensingRepository.setStatus(ServiceStatus.RUNNING)
@@ -178,6 +219,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     private fun stopSensing() {
         imu?.stop()
         sensorManager.unregisterListener(stepListener)
+        if (carReceiverRegistered) { unregisterReceiver(carBluetoothReceiver); carReceiverRegistered = false }
+        if (proximityRegistered) { sensorManager.unregisterListener(proximityListener); proximityRegistered = false }
         vehiclePendingIntent?.let { pi ->
             try {
                 ActivityRecognition.getClient(this).removeActivityUpdates(pi)
@@ -186,7 +229,10 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             }
             pi.cancel()
         }
-        engine?.let { saveDailyState(it.wellness.exportState()) }
+        engine?.let {
+            saveDailyState(it.wellness.exportState())
+            FitToDriveStore.save(this, it.fitToDrive.exportState())
+        }
         classifier?.close()
         engine = null
         if (wakeLock?.isHeld == true) wakeLock?.release()
@@ -243,7 +289,10 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         }
         if (lastSaveT == Long.MIN_VALUE || t - lastSaveT >= SAVE_INTERVAL_NS) {
             lastSaveT = t
-            engine?.let { saveDailyState(it.wellness.exportState()) }
+            engine?.let {
+                saveDailyState(it.wellness.exportState())
+                if (fitDirty) { fitDirty = false; FitToDriveStore.save(this, it.fitToDrive.exportState()) }
+            }
         }
         maybeUpdateStatusNotification(snapshot)
     }
@@ -287,6 +336,113 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         notificationManager.notify(BREAK_NOTIFICATION_ID, n)
     }
 
+    override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) {
+        when (event) {
+            is FitToDriveEvent.StateChanged -> fitDirty = true
+            is FitToDriveEvent.SegmentMeasured -> studyLogSegment(event)
+            is FitToDriveEvent.WalkChecked -> {
+                studyLogCheck(event.check)
+                val c = event.check
+                when {
+                    // The trip was detected while moving: never ask a driver to use the phone.
+                    c.level == WalkLevel.LARGE_GAP && c.trigger == CheckTrigger.TRIP_START ->
+                        notifyFit(getString(R.string.fit_notify_moving_title), getString(R.string.fit_notify_moving_text), balanceAction = false)
+                    c.level == WalkLevel.LARGE_GAP ->
+                        notifyFit(getString(R.string.fit_notification_title),
+                            getString(R.string.fit_notification_text, (c.percentile * 100).toInt()), balanceAction = true)
+                    // Car Bluetooth (about to drive) and a slightly unusual walk: a quiet offer.
+                    event.advice == FitAdvice.CONSIDER_BALANCE_CHECK && c.trigger == CheckTrigger.CAR_BLUETOOTH ->
+                        notifyFit(getString(R.string.fit_notify_consider_title), getString(R.string.fit_notify_consider_text),
+                            balanceAction = true, urgent = false)
+                }
+            }
+            is FitToDriveEvent.DrivingAfterWarning ->
+                notifyFit(getString(R.string.fit_notify_reminder_title), getString(R.string.fit_notify_reminder_text), balanceAction = false)
+            is FitToDriveEvent.BalanceDone -> {
+                studyLogBalance(event.result)
+                if (event.result.outcome == BalanceOutcome.REFERENCE_SAVED) {
+                    engine?.let { FitToDriveStore.save(this, it.fitToDrive.exportState()) }
+                    fitDirty = false
+                }
+            }
+        }
+    }
+
+    private fun notifyFit(title: String, text: String, balanceAction: Boolean, urgent: Boolean = true) {
+        fun open(code: Int, extra: String?) = PendingIntent.getActivity(this, code,
+            Intent(this, FitToDriveActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .apply { if (extra != null) putExtra(extra, true) },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val b = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(if (urgent) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentIntent(open(21, null))
+            .setAutoCancel(true)
+        if (balanceAction) b.addAction(0, getString(R.string.fit_action_balance), open(22, FitToDriveActivity.EXTRA_START_BALANCE))
+        b.addAction(0, getString(R.string.fit_action_not_driving), open(23, FitToDriveActivity.EXTRA_DISMISS))
+        notificationManager.notify(FIT_NOTIFICATION_ID, b.build())
+    }
+
+    // ------------------------------------------------------------------ study log (labelled sessions only)
+    private fun loadStudySettings() {
+        studyCondition = FitToDriveStore.studyCondition(this)
+        studyParticipant = FitToDriveStore.studyParticipant(this)
+        engine?.setFitLearningPaused(studyCondition != StudyCondition.OFF)
+    }
+
+    private fun studyTime(wall: Long) = Instant.ofEpochMilli(wall).atZone(ZoneId.systemDefault()).toLocalDateTime().toString()
+
+    private fun studyRow(wall: Long, event: String, trigger: CheckTrigger? = null, level: String? = null,
+                         score: Float = Float.NaN, percentile: Float = Float.NaN, unusualAt: Float = Float.NaN,
+                         largeAt: Float = Float.NaN, features: FloatArray? = null, balance: BalanceResult? = null) {
+        if (studyCondition == StudyCondition.OFF) return
+        val f = features ?: FloatArray(GaitFeature.COUNT) { Float.NaN }
+        StudyLog.append(this, listOf(studyTime(wall), studyParticipant, studyCondition.name, event, trigger?.name, level,
+            score, percentile, unusualAt, largeAt, f[0], f[1], f[2], f[3], f[4], f[5],
+            balance?.outcome?.name, balance?.swayAccel, balance?.swayGyro, balance?.ratio))
+    }
+
+    private fun studyLogSegment(e: FitToDriveEvent.SegmentMeasured) {
+        val wall = if (wallOffsetMs == Long.MIN_VALUE) System.currentTimeMillis() else wallOffsetMs + e.segment.tEndNanos / 1_000_000
+        studyRow(wall, "segment", score = e.distance, features = e.segment.values)
+    }
+
+    private fun studyLogCheck(c: WalkCheck) = studyRow(c.wallMillis, "walk_check", c.trigger,
+        c.level?.name ?: c.notScored?.name, c.score, c.percentile, c.unusualAt, c.largeAt)
+
+    private fun studyLogBalance(r: BalanceResult) =
+        studyRow(r.wallMillis, if (r.purpose == BalancePurpose.REFERENCE) "balance_reference" else "balance_check", balance = r)
+
+    /**
+     * While the check is enabled: the proximity sensor (pocket detection) and,
+     * if the user opted in, the car-Bluetooth receiver.
+     */
+    private fun updateFitSensors() {
+        val enabled = FitToDriveStore.isEnabled(this)
+        val wantBt = enabled && FitToDriveStore.useCarBluetooth(this) && hasBluetoothPermission(this)
+        if (wantBt != carReceiverRegistered) {
+            if (wantBt) {
+                ContextCompat.registerReceiver(this, carBluetoothReceiver, IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED),
+                    null, handler, ContextCompat.RECEIVER_EXPORTED) // a protected system broadcast
+            } else {
+                unregisterReceiver(carBluetoothReceiver)
+            }
+            carReceiverRegistered = wantBt
+        }
+        val proximity = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+        val wantProximity = enabled && proximity != null
+        if (wantProximity != proximityRegistered) {
+            proximityRegistered = wantProximity &&
+                sensorManager.registerListener(proximityListener, proximity, SensorManager.SENSOR_DELAY_NORMAL, handler)
+            if (!wantProximity) sensorManager.unregisterListener(proximityListener)
+        }
+        engine?.setProximityAvailable(proximityRegistered)
+    }
+
     // ------------------------------------------------------------------ controller (any thread)
     override fun setUiVisible(visible: Boolean) {
         handler.post { engine?.setUiVisible(visible) }
@@ -301,6 +457,46 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         handler.post { engine?.onVehicleConfidence(confidence) }
     }
 
+    override fun setFitToDriveEnabled(enabled: Boolean) {
+        handler.post {
+            engine?.setFitToDriveEnabled(enabled)
+            updateFitSensors()
+        }
+        if (!enabled) notificationManager.cancel(FIT_NOTIFICATION_ID)
+    }
+
+    /** Settings changed (car Bluetooth opt-in, study session label). */
+    override fun refreshFitSettings() {
+        handler.post {
+            updateFitSensors()
+            loadStudySettings()
+        }
+    }
+
+    override fun requestFitCheck() { handler.post { engine?.requestFitCheck() } }
+
+    override fun startBalanceTest(purpose: BalancePurpose) {
+        handler.post {
+            val refusals = listOf(getString(R.string.fit_reference_refused), getString(R.string.fit_balance_in_vehicle))
+            when (engine?.startBalanceTest(purpose)) {
+                BalanceStart.REFUSED_WARNING -> SensingRepository.setMessage(refusals[0])
+                BalanceStart.REFUSED_IN_VEHICLE -> SensingRepository.setMessage(refusals[1])
+                BalanceStart.STARTED -> if (SensingRepository.message.value in refusals) SensingRepository.setMessage(null)
+                null -> Unit
+            }
+        }
+        notificationManager.cancel(FIT_NOTIFICATION_ID)
+    }
+
+    override fun cancelBalanceTest() { handler.post { engine?.cancelBalanceTest() } }
+
+    override fun dismissFitAdvice() {
+        handler.post { engine?.dismissFitAdvice() }
+        notificationManager.cancel(FIT_NOTIFICATION_ID)
+    }
+
+    override fun resetFitToDrive() { handler.post { engine?.resetFitToDrive() } }
+
     // ------------------------------------------------------------------ notifications
     private fun createChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -311,7 +507,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             })
         notificationManager.createNotificationChannel(
             NotificationChannel(ALERT_CHANNEL_ID, "Safety & health alerts", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Fall alerts and sedentary break reminders"
+                description = "Fall alerts, break reminders and fit-to-drive checks"
                 enableVibration(true)
             })
     }

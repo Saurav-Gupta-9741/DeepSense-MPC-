@@ -24,6 +24,9 @@ from har_datasets import STANDARD_GRAVITY
 FIXTURES = {
     # name: (trial dir, subject, seconds, start offset seconds)
     "walking_pocket": ("wlk_7", 1, 30, 5),
+    # Two more walking sessions of the same person: fit-to-drive baseline / held-out walk.
+    "walking_session2_pocket": ("wlk_8", 1, 60, 5),
+    "walking_session3_pocket": ("wlk_15", 1, 22, 2),
     "jogging_pocket": ("jog_9", 1, 20, 3),
     "sitting_pocket": ("sit_5", 1, 30, 5),
     "upstairs_pocket": ("ups_3", 1, 15, 2),

@@ -91,9 +91,24 @@ When the user has been still for 60 s and nobody is viewing the dashboard, the a
 
 Sampling stays at 50 Hz because the model requires it. The battery saving has not yet been measured.
 
-### 9. Verified, reproducible engineering
+### 9. Personal fit-to-drive check (opt-in)
+No drinking data is needed: the app learns only the user's own everyday walk, then scores the walk to the car against it.
+1. **Learn normal:** orientation-independent gait features from the leg swing (stride timing, regularity, side-to-side sway, turning steadiness).
+2. **Watch the walk:** scored when a trip starts, when the car's Bluetooth connects, or on request.
+3. **Measure the gap:** compared with the person's own walks, using percentiles rather than fixed thresholds.
+4. **Respond:** a large gap asks for a 30 s balance check against the user's own reference, then suggests a cab or a trusted contact.
+
+It flags unusual impairment, not alcohol, and only advises.
+
+**Measured on all 24 MotionSense people** (baseline from two sessions, the third held out):
+- sober held-out walk: 1/24 large-gap false alarms;
+- simulated strong impairment: 24/24 detected.
+
+Details: [`FIT_TO_DRIVE.md`](FIT_TO_DRIVE.md).
+
+### 10. Verified, reproducible engineering
 - The model is validated in the exact TFLite runtime version the app ships. The v1 model failed this check on the phone itself.
-- 49 JVM tests exercise the real Kotlin engine by replaying real sensor recordings, delivered with realistic timing jitter.
+- 82 JVM tests exercise the real Kotlin engine by replaying real sensor recordings, delivered with realistic timing jitter.
 - 24 model tests run on held-out real data.
 - Every push to GitHub runs all tests and builds the APK automatically.
 
@@ -105,3 +120,4 @@ Sampling stays at 50 Hz because the model requires it. The battery saving has no
 - **Falls and road hazards:** both are validated on physics-based scenarios. No labelled real recordings of these events were available.
 - **Phone placement:** the model was trained on pocket and waist placements, so a phone held in the hand is less reliable.
 - **Energy:** the eco-mode battery saving is implemented but not yet measured.
+- **Fit to drive:** validated on real sober walking and on physics-simulated impairment. Calibrating against impaired gait needs the goggle field study in `FIT_TO_DRIVE.md`.

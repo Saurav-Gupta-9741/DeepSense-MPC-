@@ -14,9 +14,16 @@
         android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION"
         android:maxSdkVersion="28" />
 
+    <!-- Fit-to-drive (optional): notice the car's Bluetooth connecting, to check before the car moves. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -39,6 +46,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".FitToDriveActivity"
+            android:exported="false"
+            android:label="@string/fit_title"
+            android:launchMode="singleTop"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/Theme.PervasiveSense" />
 
         <service
             android:name=".SensingForegroundService"

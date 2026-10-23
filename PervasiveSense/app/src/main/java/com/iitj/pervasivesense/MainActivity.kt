@@ -55,6 +55,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.btnFallAck.setOnClickListener { SensingRepository.acknowledgeFall() }
+        val openFit = View.OnClickListener { startActivity(Intent(this, FitToDriveActivity::class.java)) }
+        binding.cardFit.setOnClickListener(openFit)
+        binding.btnFitOpen.setOnClickListener(openFit)
         diagnosticsOpen = savedInstanceState?.getBoolean(KEY_DIAGNOSTICS) ?: false
         binding.tvDiagnosticsToggle.setOnClickListener {
             diagnosticsOpen = !diagnosticsOpen
@@ -157,6 +160,7 @@ class MainActivity : AppCompatActivity() {
         renderPosture(s)
         renderWellness(s.wellness)
         renderSafety(s)
+        renderFit(s.fitToDrive, inVehicle = s.context == "IN_VEHICLE")
         renderRoad(s)
         renderLog(s)
         renderDiagnostics(s)
@@ -311,6 +315,31 @@ class MainActivity : AppCompatActivity() {
         tvFallDetail.setText(detail)
         fallDot.backgroundTintList = tint(dot)
         btnFallAck.visibility = if (s.fallState == FallState.FALL_CONFIRMED) View.VISIBLE else View.GONE
+    }
+
+    private fun renderFit(f: FitToDriveReport, inVehicle: Boolean) = with(binding) {
+        val warning = f.advice == FitAdvice.TAKE_BALANCE_CHECK || f.advice == FitAdvice.DONT_DRIVE
+        val (text, dot) = when {
+            !f.enabled -> getString(R.string.fit_card_off) to R.color.text_muted
+            warning && inVehicle -> getString(R.string.fit_advice_stop_title) to R.color.accent_rose
+            f.advice == FitAdvice.CONSIDER_BALANCE_CHECK -> getString(R.string.fit_advice_consider_title) to R.color.accent_amber
+            f.advice == FitAdvice.TAKE_BALANCE_CHECK -> getString(R.string.fit_advice_balance_title) to R.color.accent_amber
+            f.advice == FitAdvice.DONT_DRIVE -> getString(R.string.fit_advice_dont_title) to R.color.accent_rose
+            f.advice == FitAdvice.BALANCE_OK -> getString(R.string.fit_advice_ok_title) to R.color.accent_emerald
+            f.baselineStatus == BaselineStatus.LEARNING ->
+                getString(R.string.fit_card_learning, pct(f.baselineSegments.toFloat() / f.segmentsForProvisional)) to R.color.accent_amber
+            else -> {
+                val last = when (f.lastCheck?.level) {
+                    null -> getString(R.string.fit_last_title) + ": --"
+                    WalkLevel.NORMAL -> getString(R.string.fit_level_normal)
+                    WalkLevel.UNUSUAL -> getString(R.string.fit_level_unusual)
+                    WalkLevel.LARGE_GAP -> getString(R.string.fit_level_large)
+                }
+                getString(R.string.fit_card_ready, last) to R.color.accent_emerald
+            }
+        }
+        tvFitStatus.text = text
+        fitDot.backgroundTintList = tint(dot)
     }
 
     private fun renderRoad(s: SensingSnapshot) = with(binding) {

@@ -4,6 +4,16 @@
     "seconds": 30,
     "reference_steps_per_second": 1.855
   },
+  "walking_session2_pocket": {
+    "source": "MotionSense wlk_8/sub_1.csv",
+    "seconds": 60,
+    "reference_steps_per_second": 1.862
+  },
+  "walking_session3_pocket": {
+    "source": "MotionSense wlk_15/sub_1.csv",
+    "seconds": 22,
+    "reference_steps_per_second": 1.788
+  },
   "jogging_pocket": {
     "source": "MotionSense jog_9/sub_1.csv",
     "seconds": 20,

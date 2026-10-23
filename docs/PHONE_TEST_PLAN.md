@@ -96,9 +96,28 @@ report after the vehicle starts moving.
 | H1 | Deny *Physical activity* (Android 14+) | Clear message above the button explaining it is required; no crash |
 | H2 | Deny *Physical activity* (Android 10–13) | Sensing starts; Road hazards says it needs the permission |
 
+## I. Fit-to-drive check (**never drive for these tests**)
+
+| # | Do this | Pass if |
+|---|---|---|
+| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the dashboard card shows *Learning your normal walk* |
+| I2 | Walk normally 3 min with the phone in a front trouser pocket, then wait 5 min | *Your normal walk* shows *Checking, still learning*; minutes learned increase |
+| I3 | Record normal balance (feet together, phone flat on chest, 30 s) | Beep at start and end; *Saved your normal balance (1 of 5)* |
+| I4 | Walk normally 30 s, tap **Check my walk** | *Normal for you* (or *Unusual*); the time and walking seconds are shown |
+| I5 | Wear impairment-simulation goggles (with a spotter) or walk deliberately unsteadily, swaying side to side with irregular steps, for 30 s; tap **Check my walk** | *Very different from your normal*, an amber *Take the balance check* card, the features that differed most |
+| I6 | Balance check while swaying | *Better not to drive now* with *Find a cab*; with a trusted contact saved, *Call* and *Message* open the dialer / SMS app with the number filled in |
+| I7 | Balance check standing still | *Your balance looks normal* |
+| I8 | As a **passenger**, walk 30 s to a car and ride | When the trip is detected, a check runs (*Trip started*); with goggles or unsteady walking, a notification offers the balance check |
+| I9 | (Optional) Turn on *Check when my car's Bluetooth connects*, allow Nearby devices, connect to a car | A check runs (*Car Bluetooth*) before the car moves |
+| I10 | Walk with the phone in your **hand** | The screen says walks with the phone in the hand are not checked |
+| I11 | After a large-gap warning, as a **passenger**, start a trip | A reminder notification *You were advised not to drive*; the screen shows *Stop somewhere safe first* with no test button while moving |
+| I12 | Walk slightly unsteadily, then **Check my walk** | If rated *Unusual for you*: a gentle *Your walk was a bit unusual* offer with *Balance check* / *Not now* |
+| I13 | Study mode: enter a participant ID, tap *Goggles 1*, walk 1 min, do a balance check, tap *Export CSV* | Banner *learning is paused*; the exported CSV has `segment`, `walk_check` and `balance_check` rows labelled GOGGLES_LOW |
+| I14 | Turn the switch off | Nothing is learned; the dashboard card shows *Off* |
+
 ---
 
 ## Automated tests (run on every GitHub push)
 
-- 49 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 82 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)
