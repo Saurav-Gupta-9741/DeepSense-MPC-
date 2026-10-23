@@ -71,6 +71,140 @@
     <string name="road_potholes">Potholes</string>
     <string name="road_breakers">Speed breakers</string>
 
+    <!-- Fit to drive: dashboard card -->
+    <string name="card_fit">Fit to drive</string>
+    <string name="fit_open">Open</string>
+    <string name="fit_card_off">Off. Opt in to check your walk before you drive.</string>
+    <string name="fit_card_learning">Learning your normal walk (%1$d%%)</string>
+    <string name="fit_card_ready">Ready. %1$s</string>
+
+    <!-- Fit to drive: screen -->
+    <string name="fit_title">Fit to drive</string>
+    <string name="fit_subtitle">Compares your walk to the car with your own normal walk</string>
+    <string name="fit_enable">Fit-to-drive check</string>
+    <string name="fit_not_running">Sensing is stopped. Start it on the dashboard to use the check.</string>
+    <string name="fit_disabled_hint">Turn on the check to start learning your normal walk. Nothing is recorded while it is off.</string>
+    <string name="fit_consent_title">Turn on the fit-to-drive check?</string>
+    <string name="fit_consent_body">PervasiveSense will learn how you normally walk from your everyday walking (best after 1–2 weeks), then compare the walk to your car with it.\n\n• It flags walking that is unusual for you, not alcohol itself. Tiredness, an injury, new shoes or a heavy bag can also change your walk.\n• It only gives advice. It is not a breathalyser and never legal evidence.\n• Everything stays on this phone. You can turn it off or forget the learned data at any time.</string>
+    <string name="fit_consent_ok">Turn on</string>
+    <string name="fit_cancel">Cancel</string>
+
+    <string name="fit_notification_title">Fit to drive? Take a balance check</string>
+    <string name="fit_notification_text">Your walk was more unusual than %1$d%% of your normal walks. Before you drive, take the 30-second balance check.</string>
+    <string name="fit_notify_moving_title">Your walk was very different from usual</string>
+    <string name="fit_notify_moving_text">If you are driving, don’t use your phone. Stop somewhere safe first, then open the app for a balance check.</string>
+    <string name="fit_notify_consider_title">Your walk was a bit unusual</string>
+    <string name="fit_notify_consider_text">Take the 30-second balance check before you drive?</string>
+    <string name="fit_notify_reminder_title">You were advised not to drive</string>
+    <string name="fit_notify_reminder_text">If you are driving, stop somewhere safe. A cab or a friend can take you instead.</string>
+    <string name="fit_balance_in_vehicle">Stop the vehicle and step out to take the balance check. Never use your phone while driving.</string>
+    <string name="fit_advice_consider_title">Your walk was a bit unusual</string>
+    <string name="fit_advice_consider_detail">Before you drive, take the 30-second balance check to be sure.</string>
+    <string name="fit_advice_stop_title">Stop somewhere safe first</string>
+    <string name="fit_advice_stop_detail">Your check warned against driving. If you are driving, don’t use your phone: stop safely and step out, then take the balance check or get a cab.</string>
+    <string name="fit_action_not_now">Not now</string>
+    <string name="fit_action_passenger">I’m a passenger</string>
+    <string name="fit_pocket_hint">Keep the phone in your trouser pocket while walking. Walks with the phone in your hand are not checked.</string>
+    <string name="fit_balance_reference_rejected">Not saved: much less steady than your earlier normal balance. Record it again when you are rested and sober.</string>
+
+    <string name="fit_setup_title">Set up</string>
+    <string name="fit_setup_walk">Walk normally with the phone in your trouser pocket (%1$d%%)</string>
+    <string name="fit_setup_walk_done">Your normal walk is learned</string>
+    <string name="fit_setup_balance">Record your normal balance (%1$d of %2$d)</string>
+    <string name="fit_setup_contact">Add a trusted contact in Settings below</string>
+    <string name="fit_setup_contact_done">Trusted contact added</string>
+    <string name="fit_setup_dialog_title">Next: record your normal balance</string>
+    <string name="fit_setup_dialog_body">Do this now while you are rested and sober, 3 times (30 s each). Later balance checks compare with these recordings.</string>
+    <string name="fit_setup_dialog_ok">Record now</string>
+    <string name="fit_setup_dialog_later">Later</string>
+
+    <string name="fit_study_title">Study mode (goggle testing)</string>
+    <string name="fit_study_detail">Label a test session. While a label is on, nothing is learned, and every walk segment, check and balance result is saved for export.</string>
+    <string name="fit_study_participant">Participant ID</string>
+    <string name="fit_study_off">Off</string>
+    <string name="fit_study_sober">Sober</string>
+    <string name="fit_study_goggles_low">Goggles 1</string>
+    <string name="fit_study_goggles_high">Goggles 2</string>
+    <string name="fit_study_rows">%1$d rows logged</string>
+    <string name="fit_study_export">Export CSV</string>
+    <string name="fit_study_clear">Clear log</string>
+    <string name="fit_study_exported">Study log exported</string>
+    <string name="fit_study_export_failed">Nothing to export yet</string>
+    <string name="fit_study_clear_confirm">Delete all logged study rows?</string>
+    <string name="fit_study_paused">Study session labelled: learning is paused</string>
+
+    <string name="fit_advice_balance_title">Take the balance check before you drive</string>
+    <string name="fit_advice_balance_detail">Your walk was more unusual than %1$d%% of your normal walks.</string>
+    <string name="fit_advice_dont_title">Better not to drive now</string>
+    <string name="fit_advice_dont_detail">Your walk and your balance were both unusual for you. Take a cab or ask someone to drive.</string>
+    <string name="fit_advice_ok_title">Your balance looks normal</string>
+    <string name="fit_advice_ok_detail">Your walk was unusual, but your balance matches your normal. If you have had alcohol, don’t drive.</string>
+    <string name="fit_action_balance">Balance check</string>
+    <string name="fit_action_not_driving">I’m not driving</string>
+    <string name="fit_action_cab">Find a cab</string>
+    <string name="fit_action_call">Call %1$s</string>
+    <string name="fit_action_message">Message %1$s</string>
+    <string name="fit_action_ok">OK</string>
+    <string name="fit_message_text">Hi, could you drive me or pick me up? I don’t think I should drive right now.</string>
+    <string name="fit_no_contact">Add a trusted contact in Settings below to call or message them from here.</string>
+    <string name="fit_no_app">No app on this phone can do that.</string>
+
+    <string name="fit_balance_title_check">Balance check</string>
+    <string name="fit_balance_title_reference">Recording your normal balance</string>
+    <string name="fit_balance_steps">1. Stand with your feet together, eyes open.\n2. Hold the phone flat against your chest with both hands.\n3. Stay as still as you can until the beep (30 s).</string>
+    <string name="fit_balance_settling">Get into position…</string>
+    <string name="fit_balance_seconds">%1$d s</string>
+    <string name="fit_balance_passed">Balance normal: %1$.1f× your usual sway</string>
+    <string name="fit_balance_failed">Unsteady: %1$.1f× your usual sway</string>
+    <string name="fit_balance_moved">You moved or stepped during the check. Try again, standing still.</string>
+    <string name="fit_balance_no_reference">No normal-balance reference yet. Record one when you are rested and sober.</string>
+    <string name="fit_balance_reference_saved">Saved your normal balance (%1$d of %2$d).</string>
+    <string name="fit_reference_refused">Record your normal balance at another time, not while a fit-to-drive warning is active.</string>
+
+    <string name="fit_normal_title">Your normal walk</string>
+    <string name="fit_status_learning">Learning: walk as usual with the phone in your pocket</string>
+    <string name="fit_status_provisional">Checking, still learning (best after %1$d days)</string>
+    <string name="fit_status_established">Established</string>
+    <plurals name="fit_learned">
+        <item quantity="one">%1$.0f min of walking learned over %2$d day</item>
+        <item quantity="other">%1$.0f min of walking learned over %2$d days</item>
+    </plurals>
+    <string name="fit_balance_refs">Normal-balance references: %1$d of %2$d</string>
+    <string name="fit_record_reference">Record normal balance</string>
+
+    <string name="fit_last_title">Last check</string>
+    <string name="fit_last_none">No check yet. A check runs when a trip starts, when your car’s Bluetooth connects, or when you tap Check my walk.</string>
+    <string name="fit_level_normal">Normal for you</string>
+    <string name="fit_level_unusual">Unusual for you</string>
+    <string name="fit_level_large">Very different from your normal</string>
+    <string name="fit_not_scored_learning">Not checked: still learning your normal walk</string>
+    <string name="fit_not_scored_no_walk">Not checked: no walking in the last few minutes</string>
+    <string name="fit_check_meta">%1$s at %2$s, %3$d s of walking</string>
+    <string name="fit_check_meta_short">%1$s at %2$s</string>
+    <string name="fit_trigger_trip">Trip started</string>
+    <string name="fit_trigger_bt">Car Bluetooth</string>
+    <string name="fit_trigger_manual">On request</string>
+    <string name="fit_percentile">More unusual than %1$d%% of your normal walks</string>
+    <string name="fit_provisional">, provisional</string>
+    <string name="fit_top">Most different: %1$s</string>
+    <string name="fit_waiting">Put the phone in your trouser pocket and walk normally for about 20 seconds…</string>
+    <string name="fit_check_now">Check my walk</string>
+
+    <string name="fit_settings_title">Settings</string>
+    <string name="fit_contact_name_hint">Trusted contact name</string>
+    <string name="fit_contact_phone_hint">Phone number</string>
+    <string name="fit_contact_save">Save contact</string>
+    <string name="fit_contact_saved">Contact saved</string>
+    <string name="fit_car_bt">Check when my car’s Bluetooth connects</string>
+    <string name="fit_car_bt_detail">Checks before the car moves. Needs the Nearby devices permission.</string>
+    <string name="fit_reset">Forget my learned walk and balance</string>
+    <string name="fit_reset_confirm_title">Forget learned data?</string>
+    <string name="fit_reset_confirm_body">Your normal walk and balance will be learned again from scratch.</string>
+    <string name="fit_reset_ok">Forget</string>
+
+    <string name="fit_limits_title">How it works and its limits</string>
+    <string name="fit_limits_body" formatted="false">• Learns only your own walking: no drinking data is needed.\n• Compares side-to-side sway, step timing, stride regularity and turning with your normal walk; a check is unusual only if most of the walk is.\n• Flags unusual impairment, not alcohol itself, and only advises.\n• Never legal evidence. All processing stays on this phone.\n• Basis: in a lab study, phone sensors detected breath alcohol above 0.08% from walking with 92.5% accuracy; side-to-side sway was the strongest signal.</string>
+
     <!-- Activity log -->
     <string name="section_log">Activity log</string>
     <string name="card_transitions">Last change</string>

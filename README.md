@@ -4,10 +4,12 @@
 
 Real-time, on-device human context sensing for Android: physical activity
 (DeepSense TinyML model), posture & sedentary health, fall detection, road-hazard
-mapping in vehicles, and a daily wellness score — all from the phone's IMU,
-running continuously in a foreground service with the screen locked.
+mapping in vehicles, a daily wellness score and an opt-in **fit-to-drive check** —
+all from the phone's IMU, running continuously in a foreground service with the
+screen locked.
 
 > Project description and novelties: [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md) ·
+> Fit-to-drive check: [`docs/FIT_TO_DRIVE.md`](docs/FIT_TO_DRIVE.md) ·
 > Phone test checklist: [`docs/PHONE_TEST_PLAN.md`](docs/PHONE_TEST_PLAN.md)
 
 > **Version 2.x.** v1 could not respond in real time and its model never loaded on
@@ -29,7 +31,8 @@ running continuously in a foreground service with the screen locked.
 | Dashboard refresh / inference cadence | 10 Hz / every 0.5 s |
 | Model | 82.8 KB dynamic-range INT8, 0.3 ms per inference (desktop CPU), 99.95 % argmax agreement with float |
 | Step counting on real walking / jogging / stairs (vs an independent gyroscope reference) | within 1 – 5 % |
-| Automated tests | 49 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
+| Fit-to-drive, 24 people: sober held-out walk / simulated strong / mild impairment | large gap **1/24** / **24/24** / 18/24 (mild flagged 23/24) |
+| Automated tests | 82 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
 
 ---
 
@@ -112,6 +115,8 @@ classes (see [Limitations](#limitations)).
 | `RoadAnomalyDetector.kt` | Gravity-projected vertical shocks → potholes / speed breakers (vehicle only) |
 | `StepDetector.kt` | Orientation-independent pedometer (fallback for phones without a step counter) |
 | `WellnessScoreEngine.kt` | Daily score `0.3·Diversity + 0.3·Ergonomic + 0.2·Movement + 0.2·Safety` |
+| `GaitSegmentExtractor.kt`, `GaitBaseline.kt`, `BalanceTest.kt`, `FitToDriveMonitor.kt` | Fit-to-drive check: personal gait baseline, walk scoring, 30 s balance test, advice ([details](docs/FIT_TO_DRIVE.md)) |
+| `FitToDriveActivity.kt`, `FitToDriveStore.kt` | Fit-to-drive screen; settings and on-device persistence |
 | `SensingForegroundService.kt` | Sensing thread, eco batching, wake lock, notifications, persistence |
 | `SensorDataSource.kt` | `PhoneImuSource`; interface for adding wearable IMUs |
 
@@ -163,7 +168,7 @@ The TensorFlow version must match `org.tensorflow:tensorflow-lite` in `app/build
 
 See [`docs/TESTING.md`](docs/TESTING.md) for what each test proves.
 
-**1. Engine: 49 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
+**1. Engine: 82 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
 real Kotlin code, mostly by replaying real MotionSense recordings delivered like
 a phone does: separate accel/gyro streams at 57.3 / 48.7 Hz with ±2 ms jitter.
 ```bash
@@ -230,7 +235,7 @@ The full feature-by-feature checklist is in
 PervasiveSense/                 Android app (Kotlin, minSdk 26, targetSdk 34)
   app/src/main/java/...          sources (table above)
   app/src/main/assets/           deepsense_int8.tflite, deepsense_labels.txt
-  app/src/test/                  49 JVM tests + real-data fixtures (MotionSense excerpts)
+  app/src/test/                  82 JVM tests + real-data fixtures (MotionSense excerpts)
 model/
   har_datasets.py                dataset loaders -> Android units, frame verification
   train_export_deepsense.py      training + TF 2.16.1 export + evaluation

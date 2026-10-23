@@ -33,8 +33,19 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Engine unit tests (49 JVM tests on real recordings)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+      - name: Fetch MotionSense (fit-to-drive evaluation on 24 people)
+        working-directory: .
+        run: |
+          set -e
+          git clone -q --depth 1 --filter=blob:none --no-checkout https://github.com/mmalekzadeh/motion-sense.git "$RUNNER_TEMP/ms"
+          git -C "$RUNNER_TEMP/ms" checkout HEAD -- data/A_DeviceMotion_data.zip
+          unzip -q "$RUNNER_TEMP/ms/data/A_DeviceMotion_data.zip" -d "$RUNNER_TEMP/msdata"
+          echo "MOTIONSENSE_DIR=$RUNNER_TEMP/msdata" >> "$GITHUB_ENV"
+
+      - name: Engine unit tests (82 JVM tests on real recordings, none skipped)
+        run: |
+          ./gradlew :app:testDebugUnitTest --stacktrace
+          ! grep -l "<skipped" app/build/test-results/testDebugUnitTest/*.xml
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace

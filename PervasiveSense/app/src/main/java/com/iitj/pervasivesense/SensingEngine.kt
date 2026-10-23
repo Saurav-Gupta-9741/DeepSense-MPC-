@@ -31,6 +31,7 @@ data class SensingSnapshot(
     val inferencesRun: Long,
     val stepSource: String,
     val hasGyro: Boolean,
+    val fitToDrive: FitToDriveReport,
     val sensorTimeNanos: Long
 )
 
@@ -40,6 +41,7 @@ data class SensingSnapshot(
  *
  *   raw accel/gyro events --ImuResampler--> uniform 50 Hz samples
  *     every sample : posture/fidget, fall FSM, road anomalies, step detection,
+ *                    fit-to-drive gait segments / balance test,
  *                    sliding window, UI publish (10 Hz while visible)
  *     every stride : DeepSense inference on the latest 2.56 s window,
  *                    smoothing + hysteresis, transitions, wellness, eco mode
@@ -61,7 +63,8 @@ class SensingEngine(
         val ecoAfterStillSec: Float = 60f,
         val vehicleConfidenceMin: Int = 70,
         val vehicleExpirySec: Float = 120f,
-        val recoveryLocomotionSec: Float = 5f
+        val recoveryLocomotionSec: Float = 5f,
+        val fitToDrive: FitToDriveMonitor.Config = FitToDriveMonitor.Config()
     )
 
     interface Listener {
@@ -71,6 +74,7 @@ class SensingEngine(
         fun onEcoModeChanged(eco: Boolean) {}
         fun onRoadAnomaly(event: RoadAnomalyEvent) {}
         fun onTransition(event: TransitionEvent) {}
+        fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) {}
     }
 
     private val labels = classifier.labels
@@ -83,6 +87,7 @@ class SensingEngine(
     private val stepDetector = StepDetector()
     private val transitions = ActivityTransitionDetector()
     val wellness = WellnessScoreEngine()
+    val fitToDrive = FitToDriveMonitor(wallClockOf, dayKeyOf, ::onFitToDriveEvent, config.fitToDrive)
     private val resampler = ImuResampler(sink = ::onUniformSample, onGap = ::onGap, expectGyro = hasGyroscope)
 
     private val latest = FloatArray(6)
@@ -108,10 +113,15 @@ class SensingEngine(
 
     private var vehicleConfidence = -1
     private var vehicleUpdateT = Long.MIN_VALUE
+    private var wasInVehicle = false
     var vehicleDetection = VehicleDetection.STARTING
 
     private var hardwareSteps = false
     private var lastHardwareStepTotal = -1L
+
+    // Proximity sensor: covered = phone in a pocket (fit-to-drive learns and scores pocket walks only).
+    private var proximityAvailable = false
+    private var proximityNear = false
 
     // ---------------------------------------------------------------- inputs
     override fun onAccelerometer(tNanos: Long, x: Float, y: Float, z: Float) = resampler.onAccelerometer(tNanos, x, y, z)
@@ -148,6 +158,48 @@ class SensingEngine(
         if (lastSampleT != Long.MIN_VALUE) publish(lastSampleT)
     }
 
+    // ---------------------------------------------------------------- fit-to-drive commands
+    fun setFitToDriveEnabled(on: Boolean) {
+        fitToDrive.setEnabled(on)
+        if (lastSampleT != Long.MIN_VALUE) publish(lastSampleT)
+    }
+
+    /** Whether the phone has a proximity sensor; without one every walk counts as a pocket walk. */
+    fun setProximityAvailable(available: Boolean) { proximityAvailable = available }
+
+    fun onProximity(near: Boolean) { proximityNear = near }
+
+    /** A labelled study session (e.g. impairment goggles): measure and log, never learn. */
+    fun setFitLearningPaused(paused: Boolean) {
+        fitToDrive.learningPaused = paused
+        if (lastSampleT != Long.MIN_VALUE) publish(lastSampleT)
+    }
+
+    fun requestFitCheck() = fitCommand { fitToDrive.requestCheck(lastSampleT) }
+    fun onCarBluetoothConnected() = fitCommand { fitToDrive.onCarBluetooth(lastSampleT) }
+    fun dismissFitAdvice() = fitCommand { fitToDrive.dismissAdvice() }
+    fun resetFitToDrive() = fitCommand { fitToDrive.resetLearning() }
+    fun cancelBalanceTest() = fitCommand { fitToDrive.cancelBalanceTest() }
+
+    /** Null if no sensor data has arrived yet. Refused in a moving vehicle or (references) during a warning. */
+    fun startBalanceTest(purpose: BalancePurpose): BalanceStart? {
+        if (lastSampleT == Long.MIN_VALUE) return null
+        val result = fitToDrive.startBalanceTest(lastSampleT, purpose, inVehicle = isInVehicle(lastSampleT))
+        publish(lastSampleT)
+        return result
+    }
+
+    /** Commands that need a sensor timestamp are ignored until the first sample. */
+    private inline fun fitCommand(action: () -> Unit) {
+        if (lastSampleT == Long.MIN_VALUE) return
+        action()
+        publish(lastSampleT)
+    }
+
+    private fun onFitToDriveEvent(e: FitToDriveEvent) {
+        if (lastSampleT != Long.MIN_VALUE) listener.onFitToDrive(e, buildSnapshot(lastSampleT))
+    }
+
     val measuredRateHz get() = resampler.measuredAccelRateHz
 
     // ---------------------------------------------------------------- pipeline
@@ -161,6 +213,7 @@ class SensingEngine(
         window.clear()
         samplesSinceInference = 0
         lastInferenceT = Long.MIN_VALUE
+        fitToDrive.onGap()
     }
 
     private fun onUniformSample(t: Long, s: FloatArray) {
@@ -180,6 +233,12 @@ class SensingEngine(
 
         val fallConfirmed = fall.processSample(t, ax, ay, az)
         if (fallConfirmed) wellness.onFallEvent()
+
+        // Fit-to-drive: score the walk that led up to a trip as soon as the trip is detected.
+        if (inVehicle && !wasInVehicle) fitToDrive.onTripStart(t)
+        wasInVehicle = inVehicle
+        fitToDrive.processSample(t, s, walking = context == "WALKING", hasGyro = resampler.hasGyroData,
+            inPocket = !proximityAvailable || proximityNear)
 
         samplesSinceInference++
         val stride = if (ecoMode) config.ecoStrideSamples else config.liveStrideSamples
@@ -295,6 +354,7 @@ class SensingEngine(
             inferencesRun = inferencesRun,
             stepSource = if (hardwareSteps) "hardware step counter" else "accelerometer peak detector",
             hasGyro = resampler.hasGyroData,
+            fitToDrive = fitToDrive.report(t),
             sensorTimeNanos = t
         )
     }
