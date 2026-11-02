@@ -25,6 +25,10 @@ object FitToDriveStore {
     fun useCarBluetooth(c: Context) = prefs(c).getBoolean("car_bluetooth", false)
     fun setUseCarBluetooth(c: Context, on: Boolean) = prefs(c).edit().putBoolean("car_bluetooth", on).apply()
 
+    /** Opt-in: text the trusted contact (after a countdown) when driving after a warning. */
+    fun alertContact(c: Context) = prefs(c).getBoolean("alert_contact", false)
+    fun setAlertContact(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alert_contact", on).apply()
+
     fun contactName(c: Context): String = prefs(c).getString("contact_name", "") ?: ""
     fun contactPhone(c: Context): String = prefs(c).getString("contact_phone", "") ?: ""
     fun setContact(c: Context, name: String, phone: String) =

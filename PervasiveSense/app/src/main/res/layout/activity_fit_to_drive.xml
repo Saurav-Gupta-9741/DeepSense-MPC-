@@ -96,6 +96,49 @@
                     android:visibility="gone" />
             </LinearLayout>
 
+            <!-- Contact alert counting down: cancel as a passenger -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardAlert"
+                style="@style/PS.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:id="@+id/tvAlertTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/accent_rose"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvAlertDetail"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnAlertCancel"
+                        android:layout_width="match_parent"
+                        android:layout_height="64dp"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/fit_alert_cancel"
+                        android:textColor="@color/bg_dark"
+                        android:textSize="16sp"
+                        app:backgroundTint="@color/primary_cyan"
+                        app:cornerRadius="12dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- Advice: only when there is something to act on -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardAdvice"
@@ -740,6 +783,51 @@
                             android:layout_height="wrap_content"
                             android:contentDescription="@string/fit_car_bt" />
                     </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/fit_alert_switch"
+                                android:textColor="@color/text_main"
+                                android:textSize="14sp" />
+
+                            <TextView
+                                style="@style/PS.Caption"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/fit_alert_switch_hint" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchAlertContact"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="@string/fit_alert_switch" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnTestAlert"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/fit_alert_test"
+                        android:textColor="@color/text_main"
+                        android:visibility="gone"
+                        app:cornerRadius="12dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRecordAgain"

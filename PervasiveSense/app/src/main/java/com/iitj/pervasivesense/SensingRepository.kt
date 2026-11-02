@@ -25,6 +25,10 @@ object SensingRepository {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    /** A contact alert counting down (fit to drive), or null. */
+    private val _alert = MutableStateFlow<AlertCountdown?>(null)
+    val alert: StateFlow<AlertCountdown?> = _alert.asStateFlow()
+
     /** Commands from UI / receivers to the running service (null when stopped). */
     interface Controller {
         fun setUiVisible(visible: Boolean)
@@ -33,7 +37,9 @@ object SensingRepository {
         fun setFitToDriveEnabled(enabled: Boolean)
         fun refreshFitSettings()
         fun requestFitCheck()
-        fun startBalanceTest(purpose: BalancePurpose)
+        fun startBalanceTest(purpose: BalancePurpose, practice: Boolean)
+        fun cancelContactAlert()
+        fun sendTestAlert()
         fun cancelBalanceTest()
         fun startFitPractice(kind: PracticeWalk)
         fun cancelFitPractice()
@@ -58,6 +64,7 @@ object SensingRepository {
     internal fun setStatus(s: ServiceStatus) { _status.value = s }
     internal fun publish(s: SensingSnapshot) { _snapshot.value = s }
     internal fun setMessage(m: String?) { _message.value = m }
+    internal fun setAlert(a: AlertCountdown?) { _alert.value = a }
 
     /**
      * Each screen reports onStart/onStop. Counted, because when one screen opens
@@ -80,7 +87,10 @@ object SensingRepository {
     fun setFitToDriveEnabled(enabled: Boolean) { controller?.setFitToDriveEnabled(enabled) }
     fun refreshFitSettings() { controller?.refreshFitSettings() }
     fun requestFitCheck() { controller?.requestFitCheck() }
-    fun startBalanceTest(purpose: BalancePurpose) { controller?.startBalanceTest(purpose) }
+    fun startBalanceTest(purpose: BalancePurpose, practice: Boolean = false) { controller?.startBalanceTest(purpose, practice) }
+    /** "Cancel – I'm a passenger". */
+    fun cancelContactAlert() { controller?.cancelContactAlert() }
+    fun sendTestAlert() { controller?.sendTestAlert() }
     fun cancelBalanceTest() { controller?.cancelBalanceTest() }
     fun startFitPractice(kind: PracticeWalk) { controller?.startFitPractice(kind) }
     fun cancelFitPractice() { controller?.cancelFitPractice() }

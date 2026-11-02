@@ -77,6 +77,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     private var wakeLock: PowerManager.WakeLock? = null
     /** Created on the first spoken walk result. */
     private var voice: FitVoice? = null
+    private var contactAlert: ContactAlert? = null
 
     // Owned by the sensing thread.
     private var engine: SensingEngine? = null
@@ -141,15 +142,16 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ContactAlert.ACTION_CANCEL) {
+            // "Cancel – I'm a passenger" in the alert notification.
+            if (!started) { stopSelf(); return START_NOT_STICKY }
+            handler.post { contactAlert?.cancel(asPassenger = true) }
+            return START_STICKY
+        }
         if (started) return START_STICKY
         try {
             val notification = buildStatusNotification("Starting", "Loading DeepSense model")
-            if (Build.VERSION.SDK_INT >= 34) {
-                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            startForegroundTyped(notification)
         } catch (e: Exception) {
             // e.g. Android 14+ refuses a "health" foreground service without the
             // Physical-activity permission.
@@ -170,6 +172,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         if (started) handler.post { stopSensing() }
         thread.quitSafely() // runs the pending teardown first
         notificationManager.cancel(BREAK_NOTIFICATION_ID)
+        handler.post { contactAlert?.shutdown() }
         voice?.shutdown(); voice = null
         SensingRepository.setStatus(ServiceStatus.STOPPED)
         super.onDestroy()
@@ -361,8 +364,17 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                             balanceAction = true, urgent = false)
                 }
             }
-            is FitToDriveEvent.DrivingAfterWarning ->
-                notifyFit(getString(R.string.fit_notify_reminder_title), getString(R.string.fit_notify_reminder_text), balanceAction = false)
+            is FitToDriveEvent.DrivingAfterWarning -> {
+                notifyFit(getString(R.string.fit_notify_reminder_title),
+                    getString(if (event.dismissed) R.string.fit_notify_reminder_dismissed_text else R.string.fit_notify_reminder_text),
+                    balanceAction = false)
+                // Connecting to one's own car is strong evidence of driving (a trip start may be a cab).
+                if (event.trigger == CheckTrigger.CAR_BLUETOOTH) alert().start(AlertKind.DRIVING_AFTER_WARNING)
+            }
+            is FitToDriveEvent.ErraticDriving -> {
+                notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_erratic_text), balanceAction = false)
+                if (!alert().start(AlertKind.ERRATIC_DRIVING)) speak(getString(R.string.fit_say_erratic))
+            }
             is FitToDriveEvent.BalanceDone -> {
                 studyLogBalance(event.result)
                 if (event.result.outcome == BalanceOutcome.REFERENCE_SAVED) {
@@ -380,8 +392,41 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             WalkLevel.LARGE_GAP -> R.string.fit_say_walk_large
             null -> if (c.notScored == NotScoredReason.NO_RECENT_WALK) R.string.fit_say_walk_none else return
         }
+        speak(getString(text))
+    }
+
+    private fun speak(text: String) {
         val v = voice ?: FitVoice(this).also { voice = it }
-        v.say(getString(text))
+        v.say(text)
+    }
+
+    private fun alert(): ContactAlert = contactAlert ?: ContactAlert(this, handler, notificationManager, ALERT_CHANNEL_ID,
+        say = ::speak, onPassenger = { engine?.confirmPassenger() }).also { contactAlert = it }
+
+    /**
+     * Health, plus location while the contact alert may need it (the location of
+     * an alert sent from the pocket, screen off, needs a location-type service).
+     */
+    private fun startForegroundTyped(notification: Notification) {
+        val withLocation = FitToDriveStore.alertContact(this) && ContactAlert.hasLocationPermission(this)
+        try {
+            when {
+                Build.VERSION.SDK_INT >= 34 -> ServiceCompat.startForeground(this, NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or (if (withLocation) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0))
+                Build.VERSION.SDK_INT >= 29 && withLocation -> ServiceCompat.startForeground(this, NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                else -> startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: SecurityException) {
+            if (!withLocation) throw e
+            // e.g. restarted in the background: location is not allowed then; keep sensing without it.
+            Log.w(TAG, "location service type refused", e)
+            if (Build.VERSION.SDK_INT >= 34) {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }
     }
 
     private fun notifyFit(title: String, text: String, balanceAction: Boolean, urgent: Boolean = true) {
@@ -483,6 +528,11 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
     /** Settings changed (car Bluetooth opt-in, study session label). */
     override fun refreshFitSettings() {
+        // Called from the screen (app in the foreground): the location type for the alert can be added now.
+        if (started) {
+            try { startForegroundTyped(buildStatusNotification("Sensing", "Settings updated")) }
+            catch (e: Exception) { Log.w(TAG, "foreground type update failed", e) }
+        }
         handler.post {
             updateFitSensors()
             loadStudySettings()
@@ -491,10 +541,18 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
     override fun requestFitCheck() { handler.post { engine?.requestFitCheck() } }
 
-    override fun startBalanceTest(purpose: BalancePurpose) {
+    override fun cancelContactAlert() { handler.post { contactAlert?.cancel(asPassenger = true) } }
+
+    override fun sendTestAlert() {
+        handler.post {
+            if (!alert().start(AlertKind.TEST)) SensingRepository.setMessage(getString(R.string.fit_alert_not_ready))
+        }
+    }
+
+    override fun startBalanceTest(purpose: BalancePurpose, practice: Boolean) {
         handler.post {
             val refusals = listOf(getString(R.string.fit_reference_refused), getString(R.string.fit_balance_in_vehicle))
-            when (engine?.startBalanceTest(purpose)) {
+            when (engine?.startBalanceTest(purpose, practice)) {
                 BalanceStart.REFUSED_WARNING -> SensingRepository.setMessage(refusals[0])
                 BalanceStart.REFUSED_IN_VEHICLE -> SensingRepository.setMessage(refusals[1])
                 BalanceStart.STARTED -> if (SensingRepository.message.value in refusals) SensingRepository.setMessage(null)

@@ -64,6 +64,14 @@ class FitToDriveActivity : AppCompatActivity() {
     private val bluetoothPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> setCarBluetooth(granted) }
 
+    /** SMS is needed for the contact alert; location is optional (added to the message). */
+    private val alertPermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+            val ok = ContactAlert.hasSmsPermission(this)
+            if (!ok) Toast.makeText(this, R.string.fit_alert_need_sms, Toast.LENGTH_LONG).show()
+            setAlertContact(ok)
+        }
+
     private val exportStudy = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri == null) return@registerForActivityResult
         val ok = StudyLog.exportTo(this, uri)
@@ -89,6 +97,8 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.switchEnabled.isChecked = FitToDriveStore.isEnabled(this)
         binding.switchCarBluetooth.isChecked = FitToDriveStore.useCarBluetooth(this) &&
             SensingForegroundService.hasBluetoothPermission(this)
+        binding.switchAlertContact.isChecked = FitToDriveStore.alertContact(this) && ContactAlert.hasSmsPermission(this)
+        binding.btnTestAlert.visibility = if (binding.switchAlertContact.isChecked) View.VISIBLE else View.GONE
         binding.etContactName.setText(FitToDriveStore.contactName(this))
         binding.etContactPhone.setText(FitToDriveStore.contactPhone(this))
         binding.etParticipant.setText(FitToDriveStore.studyParticipant(this))
@@ -104,6 +114,9 @@ class FitToDriveActivity : AppCompatActivity() {
                 setCarBluetooth(on)
             }
         }
+        binding.switchAlertContact.setOnCheckedChangeListener { _, on -> if (!bindingUi) onAlertToggled(on) }
+        binding.btnTestAlert.setOnClickListener { SensingRepository.sendTestAlert() }
+        binding.btnAlertCancel.setOnClickListener { SensingRepository.cancelContactAlert() }
         binding.btnStep2.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnRecordAgain.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnStep3.setOnClickListener { focusContact() }
@@ -112,7 +125,7 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnBalanceCancel.setOnClickListener { SensingRepository.cancelBalanceTest(); Tests.cPending = false; voice?.stop() }
         binding.btnTestA.setOnClickListener { startPractice(PracticeWalk.NORMAL) }
         binding.btnTestB.setOnClickListener { startPractice(PracticeWalk.WOBBLY) }
-        binding.btnTestC.setOnClickListener { Tests.cPending = true; startBalance(BalancePurpose.CHECK) }
+        binding.btnTestC.setOnClickListener { Tests.cPending = true; startBalance(BalancePurpose.CHECK, practice = true) }
         binding.btnTestCancel.setOnClickListener { SensingRepository.cancelFitPractice(); voice?.stop() }
         binding.btnSaveContact.setOnClickListener { saveContact() }
         binding.btnCall.setOnClickListener {
@@ -154,6 +167,11 @@ class FitToDriveActivity : AppCompatActivity() {
                 combine(SensingRepository.status, SensingRepository.snapshot, SensingRepository.message) { st, snap, msg ->
                     Triple(st, snap, msg)
                 }.collect { (st, snap, msg) -> render(st, snap, msg) }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                SensingRepository.alert.collect { renderAlert(it) }
             }
         }
         handleIntent(intent)
@@ -223,6 +241,33 @@ class FitToDriveActivity : AppCompatActivity() {
         SensingRepository.refreshFitSettings()
     }
 
+    /** The contact alert needs a saved contact, a phone that can text, and the SMS permission. */
+    private fun onAlertToggled(on: Boolean) {
+        if (!on) { setAlertContact(false); return }
+        when {
+            FitToDriveStore.contactPhone(this).isBlank() -> {
+                Toast.makeText(this, R.string.fit_alert_need_contact, Toast.LENGTH_LONG).show()
+                setAlertContact(false)
+                focusContact()
+            }
+            !ContactAlert.canSendSms(this) -> {
+                Toast.makeText(this, R.string.fit_alert_no_telephony, Toast.LENGTH_LONG).show()
+                setAlertContact(false)
+            }
+            else -> alertPermissions.launch(arrayOf(Manifest.permission.SEND_SMS,
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+    }
+
+    private fun setAlertContact(on: Boolean) {
+        FitToDriveStore.setAlertContact(this, on)
+        bindingUi = true
+        binding.switchAlertContact.isChecked = on
+        bindingUi = false
+        binding.btnTestAlert.visibility = if (on) View.VISIBLE else View.GONE
+        SensingRepository.refreshFitSettings()
+    }
+
     /** Sensing is stopped: start it here, or send the user to the dashboard for the permissions. */
     private fun startSensing() {
         val missingActivityPermission = Build.VERSION.SDK_INT >= 34 &&
@@ -235,15 +280,16 @@ class FitToDriveActivity : AppCompatActivity() {
         ContextCompat.startForegroundService(this, Intent(this, SensingForegroundService::class.java))
     }
 
-    private fun startBalance(purpose: BalancePurpose) {
-        SensingRepository.startBalanceTest(purpose)
+    /** [practice]: "Test it" C, which never arms the driving watch. */
+    private fun startBalance(purpose: BalancePurpose, practice: Boolean = false) {
+        SensingRepository.startBalanceTest(purpose, practice)
         beep()
     }
 
     /** The balance check offered after test B counts as test C. */
     private fun startOfferedBalance() {
         if (Tests.results.containsKey('B') && !Tests.results.containsKey('C')) Tests.cPending = true
-        startBalance(BalancePurpose.CHECK)
+        startBalance(BalancePurpose.CHECK, practice = Tests.cPending)
     }
 
     private fun startPractice(kind: PracticeWalk) {
@@ -357,6 +403,8 @@ class FitToDriveActivity : AppCompatActivity() {
             !enabled -> getString(R.string.fit_disabled_hint) to R.color.text_muted
             f == null || f.balanceRunning -> null to 0
             f.learningPaused -> getString(R.string.fit_study_paused) to R.color.accent_amber
+            f.watchingDriving || (f.recentlyWarned && f.advice == FitAdvice.NONE) ->
+                getString(R.string.fit_watching_driving) to R.color.accent_amber
             f.walkingOutsidePocket -> getString(R.string.fit_walk_not_pocket) to R.color.accent_amber
             f.recordingWalk -> getString(R.string.fit_walk_recording) to R.color.accent_emerald
             f.practice != null -> getString(R.string.fit_test_walk_now) to R.color.primary_glow
@@ -370,6 +418,19 @@ class FitToDriveActivity : AppCompatActivity() {
         btnBanner.visibility = if (action != null) View.VISIBLE else View.GONE
         btnBanner.setText(R.string.fit_start_sensing)
         btnBanner.setOnClickListener { action?.invoke() }
+    }
+
+    /** A contact alert counting down: big cancel button for a passenger or a false alarm. */
+    private fun renderAlert(a: AlertCountdown?) = with(binding) {
+        cardAlert.visibility = if (a != null) View.VISIBLE else View.GONE
+        if (a == null) return@with
+        tvAlertTitle.text = getString(R.string.fit_alert_title, a.contactName, a.secondsLeft)
+        tvAlertDetail.setText(when (a.kind) {
+            AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_alert_detail_driving
+            AlertKind.ERRATIC_DRIVING -> R.string.fit_alert_detail_erratic
+            AlertKind.TEST -> R.string.fit_alert_detail_test
+        })
+        btnAlertCancel.setText(if (a.kind == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel)
     }
 
     private fun renderSetup(f: FitToDriveReport, canAct: Boolean) = with(binding) {

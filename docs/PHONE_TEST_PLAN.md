@@ -115,7 +115,10 @@ Extra checks (optional):
 | I8 | As a **passenger**, walk 30 s to a car and ride | When the trip is detected a check runs (*Trip started*) |
 | I9 | Turn on *Check when my car's Bluetooth connects*, allow Nearby devices, connect to a car | A check runs (*Car Bluetooth*) before the car moves |
 | I10 | Study mode: participant ID, *Goggles 1*, walk 1 min, balance check, *Export CSV* | The CSV has `segment`, `walk_check` and `balance_check` rows labelled GOGGLES_LOW |
-| I11 | Turn the switch off | The dashboard card shows *Off* |
+| I11 | Save a trusted contact (your own second number or a friend who knows), turn on **Alert my contact if I drive after a warning**, allow SMS (and location), tap **Send a test alert** | A 10 s countdown with *Cancel*, then the contact gets *PervasiveSense test…* with a map link; tapping *Cancel* during the countdown sends nothing |
+| I12 | After a real *Check my walk* large gap (walk unsteadily without *Test it*), tap *I'm not driving*, then ride as a **passenger** | Banner *…trips and driving are being watched*; when the trip is detected: reminder *You said you weren't driving…* |
+| I13 | Same, with the car's Bluetooth connecting (passenger, engine off) | A 30 s spoken countdown *Texting … in 30 s*; tap **Cancel – I'm a passenger**: nothing is sent |
+| I14 | Turn the switch off | The dashboard card shows *Off* |
 
 ---|---|---|
 | I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the *Set up (0 of 3 done)* card appears |
@@ -137,5 +140,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 88 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 99 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

@@ -148,11 +148,12 @@ class FitToDriveMonitorTest {
         FitToDriveMonitor({ it / 1_000_000 }, { "2026-10-23" }, { events += it }, cfg).apply { setEnabled(true) }
 
     /** Feeds a recording at [t0]; returns the time just after it. */
-    private fun feed(m: FitToDriveMonitor, rec: Recording, t0: Long, walking: Boolean = true, inPocket: Boolean = true): Long {
+    private fun feed(m: FitToDriveMonitor, rec: Recording, t0: Long, walking: Boolean = true, inPocket: Boolean = true,
+                     inVehicle: Boolean = false): Long {
         val s = FloatArray(6)
         for (i in 0 until rec.size) {
             rec.data[i].copyInto(s)
-            m.processSample(t0 + rec.t[i], s, walking, hasGyro = true, inPocket = inPocket)
+            m.processSample(t0 + rec.t[i], s, walking, hasGyro = true, inPocket = inPocket, inVehicle = inVehicle)
         }
         return t0 + rec.t.last() + 20_000_000L
     }
@@ -212,9 +213,9 @@ class FitToDriveMonitorTest {
         feed(m, session1, after + sixMinutes)
         m.onTripStart(after + sixMinutes + 31_000_000_000L)
         assertTrue(m.report().baselineSegments <= learned + 6) // only the new normal walk
-        // A normal walk is learned right after it is scored.
+        // A normal walk is learned right after it is scored (after the hour that follows a warning).
         val before = m.report().baselineSegments
-        val t2 = feed(m, session3, after + 2 * sixMinutes)
+        val t2 = feed(m, session3, after + 2 * sixMinutes + 3_600_000_000_000L)
         m.onTripStart(t2)
         assertEquals(WalkLevel.NORMAL, checks().last().level)
         assertTrue(m.report().baselineSegments > before)
@@ -540,6 +541,97 @@ class FitToDriveMonitorTest {
         assertEquals(NotScoredReason.NO_RECENT_WALK, c.notScored)
         assertEquals(PracticeWalk.WOBBLY, c.practice)
         assertNull(m.report().practice)
+    }
+
+    // ---------------------------------------------------------------- after "I'm not driving"
+
+    private val oneMinute = 60_000_000_000L
+    private fun reminders() = events.filterIsInstance<FitToDriveEvent.DrivingAfterWarning>()
+    private fun erratic() = events.filterIsInstance<FitToDriveEvent.ErraticDriving>()
+
+    /** A real large-gap warning from "Check my walk", then "I'm not driving". Returns the time after. */
+    private fun warnedThenDismissed(m: FitToDriveMonitor): Long {
+        var t = learnNormal(m)
+        m.requestCheck(t)
+        t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        assertEquals(WalkLevel.LARGE_GAP, checks().last().level)
+        m.dismissAdvice()
+        assertEquals(FitAdvice.NONE, m.report().advice)
+        assertTrue(m.report().recentlyWarned)
+        return t
+    }
+
+    @Test
+    fun saysNotDrivingButATripStartsWithinTheHourGivesAReminder() {
+        val m = monitor()
+        val t = warnedThenDismissed(m)
+        m.onTripStart(t + 10 * oneMinute)
+        val r = reminders().single()
+        assertTrue(r.dismissed)
+        assertEquals(CheckTrigger.TRIP_START, r.trigger)
+        // Vehicle detection flickering or the car's Bluetooth right after: one reminder per trip.
+        m.onCarBluetooth(t + 11 * oneMinute)
+        assertEquals(1, reminders().size)
+        // After the hour: no reminder.
+        m.onTripStart(t + 70 * oneMinute)
+        assertEquals(1, reminders().size)
+        assertFalse(m.report(t + 70 * oneMinute).recentlyWarned)
+    }
+
+    @Test
+    fun aPassedBalanceCheckEndsTheWatch() {
+        val m = monitor()
+        var t = learnNormal(m)
+        balance(m, BalancePurpose.REFERENCE, stance(31.0, 0.08), t)
+        t += 40_000_000_000L
+        m.requestCheck(t)
+        t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
+        balance(m, BalancePurpose.CHECK, stance(31.0, 0.08, seed = 9), t)
+        assertEquals(FitAdvice.BALANCE_OK, m.report().advice)
+        assertFalse(m.report().recentlyWarned)
+        m.dismissAdvice()
+        m.onTripStart(t + 10 * oneMinute)
+        assertTrue(reminders().isEmpty())
+    }
+
+    @Test
+    fun weavingAfterAWarningIsReportedOnceAndAPassengerIsNotWatched() {
+        val m = monitor()
+        var t = warnedThenDismissed(m) + 5 * oneMinute
+        m.onTripStart(t)
+        t = feed(m, drive(20.0) { 0.0 }, t, walking = false, inVehicle = true)
+        assertTrue(m.report().watchingDriving)
+        t = feed(m, weavingDrive(90.0), t, walking = false, inVehicle = true)
+        val e = erratic().single()
+        assertTrue(e.events.any { it.type == DrivingEventType.WEAVING })
+        // Next trip, but "I'm a passenger" (cancelled the contact alert): not watched.
+        t = feed(m, Recording.constant(5.0, 0f, 0f, 9.81f), t + oneMinute, walking = false)
+        m.onTripStart(t)
+        m.confirmPassenger()
+        t = feed(m, weavingDrive(90.0, seed = 7), t, walking = false, inVehicle = true)
+        assertFalse(m.report().watchingDriving)
+        assertEquals(1, erratic().size)
+    }
+
+    @Test
+    fun withoutAWarningDrivingIsNeverReported() {
+        val m = monitor()
+        var t = learnNormal(m)
+        m.onTripStart(t)
+        t = feed(m, Recording.concat(drive(20.0) { 0.0 }, weavingDrive(90.0)), t, walking = false, inVehicle = true)
+        assertFalse(m.report().watchingDriving)
+        assertTrue(erratic().isEmpty())
+        // A practice wobbly walk ("Test it") is not a real warning either.
+        assertTrue(m.startPractice(t, PracticeWalk.WOBBLY))
+        t = feed(m, session1.impaired(1.0, seed = 3), t + 1_000_000_000L)
+        assertEquals(WalkLevel.LARGE_GAP, checks().last().level)
+        m.dismissAdvice()
+        assertFalse(m.report().recentlyWarned)
+        m.onTripStart(t + oneMinute)
+        feed(m, Recording.concat(drive(20.0) { 0.0 }, weavingDrive(90.0, seed = 8)), t + oneMinute, walking = false, inVehicle = true)
+        assertTrue(erratic().isEmpty())
+        assertTrue(reminders().isEmpty())
     }
 
     // ---------------------------------------------------------------- set up

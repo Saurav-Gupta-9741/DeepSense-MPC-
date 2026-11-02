@@ -72,6 +72,10 @@ data class FitToDriveReport(
     val learningPaused: Boolean,
     /** A "Test it" practice walk is waiting for the user to walk. */
     val practice: PracticeWalk?,
+    /** A real warning (large gap or failed balance) in the last hour that a passed balance check has not cleared. */
+    val recentlyWarned: Boolean,
+    /** In a vehicle after such a warning, not confirmed as a passenger: the driving is watched. */
+    val watchingDriving: Boolean,
     val lastCheck: WalkCheck?,
     val balanceRunning: Boolean,
     val balancePurpose: BalancePurpose?,
@@ -87,8 +91,13 @@ data class FitToDriveReport(
 sealed interface FitToDriveEvent {
     class WalkChecked(val check: WalkCheck, val advice: FitAdvice) : FitToDriveEvent
     class BalanceDone(val result: BalanceResult, val advice: FitAdvice) : FitToDriveEvent
-    /** A trip is starting although the last check warned against driving (a reminder, nothing more). */
-    class DrivingAfterWarning(val trigger: CheckTrigger, val advice: FitAdvice) : FitToDriveEvent
+    /**
+     * A trip is starting although the last hour brought a warning. [dismissed]: the user
+     * had tapped "I'm not driving" (or the advice expired), so this may mean driving anyway.
+     */
+    class DrivingAfterWarning(val trigger: CheckTrigger, val advice: FitAdvice, val dismissed: Boolean = false) : FitToDriveEvent
+    /** In a vehicle after a warning, the driving looks erratic (weaving, jerky steering, harsh braking). */
+    class ErraticDriving(val events: List<DrivingEvent>) : FitToDriveEvent
     /** Every analysed walking segment, with its distance from normal (NaN while learning): study log. */
     class SegmentMeasured(val segment: GaitSegment, val distance: Float) : FitToDriveEvent
     /** Learned data changed (persist it). */
@@ -145,7 +154,11 @@ class FitToDriveMonitor(
         val adviceExpirySec: Float = 3600f,
         val balanceFailRatio: Float = 1.75f,
         val balanceReferences: Int = 3,
-        val maxPerDay: Int = 150
+        val maxPerDay: Int = 150,
+        /** After a real warning, trips and driving are watched this long, even after "I'm not driving". */
+        val watchAfterWarningSec: Float = 3600f,
+        val reminderCooldownSec: Float = 600f,
+        val erraticCooldownSec: Float = 600f
     )
 
     private val extractor = GaitSegmentExtractor()
@@ -161,6 +174,9 @@ class FitToDriveMonitor(
     private val recent = ArrayDeque<Recent>()
     private val balanceTest = BalanceTest()
     private var balancePurpose: BalancePurpose? = null
+    /** The running balance test is "Test it" C: its result never arms the driving watch. */
+    private var balancePractice = false
+    val drivingWatch = DrivingWatch()
     private val references = ArrayList<BalanceReference>()
 
     var enabled = false
@@ -173,6 +189,12 @@ class FitToDriveMonitor(
     private var adviceT = Long.MIN_VALUE
     private var waitUntil = Long.MIN_VALUE
     private var practice: PracticeWalk? = null
+    /** Time of the last real warning (not from a practice test); cleared by a passed balance check. */
+    private var warnedT = Long.MIN_VALUE
+    private var lastReminderT = Long.MIN_VALUE
+    private var lastErraticT = Long.MIN_VALUE
+    private var passengerConfirmed = false
+    private var inVehicleNow = false
     private var lastT = Long.MIN_VALUE
     private var outsidePocketSince = Long.MIN_VALUE
     private var walkingNow = false
@@ -182,13 +204,20 @@ class FitToDriveMonitor(
     private val warningActive get() = advice == FitAdvice.TAKE_BALANCE_CHECK || advice == FitAdvice.DONT_DRIVE
     /** Possibly impaired right now: do not learn "normal" from it. */
     private val learningBlocked get() =
-        learningPaused || practice != null || warningActive || advice == FitAdvice.CONSIDER_BALANCE_CHECK
+        learningPaused || practice != null || warningActive || advice == FitAdvice.CONSIDER_BALANCE_CHECK ||
+            recentlyWarned(lastT)
+
+    private fun recentlyWarned(t: Long) =
+        enabled && warnedT != Long.MIN_VALUE && t - warnedT <= secs(config.watchAfterWarningSec)
+
+    /** Warned within the hour and not confirmed as a passenger on this trip. */
+    private fun drivingArmed(t: Long) = recentlyWarned(t) && !passengerConfirmed
 
     fun setEnabled(on: Boolean) {
         if (on == enabled) return
         enabled = on
         extractor.reset(); recent.clear(); waitUntil = Long.MIN_VALUE; practice = null
-        if (!on) { advice = FitAdvice.NONE; cancelBalanceTest() }
+        if (!on) { advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cancelBalanceTest() }
     }
 
     fun status(): BaselineStatus = when {
@@ -198,20 +227,23 @@ class FitToDriveMonitor(
     }
 
     /** Sensor data is missing: never build a segment across the hole. */
-    fun onGap() = extractor.reset()
+    fun onGap() { extractor.reset(); drivingWatch.reset() }
 
     /**
      * Every uniform 50 Hz sample. [walking]: the displayed activity is WALKING.
      * [inPocket]: the proximity sensor is covered (true if the phone has none);
      * only pocket walks are learned and scored, like the baseline.
+     * [inVehicle]: a trip is in progress; after a warning the driving is watched.
      */
-    fun processSample(t: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean, inPocket: Boolean = true) {
+    fun processSample(t: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean, inPocket: Boolean = true,
+                      inVehicle: Boolean = false) {
         lastT = t
         balanceTest.processSample(t, s, hasGyro)?.let { finishBalance(t, it) }
         if (advice != FitAdvice.NONE && adviceT != Long.MIN_VALUE && t - adviceT > secs(config.adviceExpirySec)) {
             advice = FitAdvice.NONE
         }
         if (!enabled) return
+        watchDriving(t, s, hasGyro, inVehicle)
         walkingNow = walking
         inPocketNow = inPocket
         outsidePocketSince = if (walking && !inPocket) (if (outsidePocketSince == Long.MIN_VALUE) t else outsidePocketSince) else Long.MIN_VALUE
@@ -237,7 +269,14 @@ class FitToDriveMonitor(
     }
 
     /** The vehicle context just started (Activity Recognition IN_VEHICLE). */
-    fun onTripStart(t: Long) { if (enabled) beforeDrive(t, CheckTrigger.TRIP_START) }
+    fun onTripStart(t: Long) {
+        passengerConfirmed = false
+        drivingWatch.clear()
+        if (enabled) beforeDrive(t, CheckTrigger.TRIP_START)
+    }
+
+    /** "I'm a passenger" (e.g. cancelling a contact alert): stop watching the driving on this trip. */
+    fun confirmPassenger() { passengerConfirmed = true }
 
     /** A car audio / hands-free Bluetooth device connected: usually before the car moves. */
     fun onCarBluetooth(t: Long) { if (enabled) beforeDrive(t, CheckTrigger.CAR_BLUETOOTH) }
@@ -273,13 +312,14 @@ class FitToDriveMonitor(
      * motion is not body sway). A reference ("my normal balance") is refused
      * while the person may be impaired.
      */
-    fun startBalanceTest(t: Long, purpose: BalancePurpose, inVehicle: Boolean = false): BalanceStart {
+    fun startBalanceTest(t: Long, purpose: BalancePurpose, inVehicle: Boolean = false, practice: Boolean = false): BalanceStart {
         if (inVehicle) return BalanceStart.REFUSED_IN_VEHICLE
         cancelPractice()
         if (purpose == BalancePurpose.REFERENCE && (warningActive || advice == FitAdvice.CONSIDER_BALANCE_CHECK)) {
             return BalanceStart.REFUSED_WARNING
         }
         balancePurpose = purpose
+        balancePractice = practice && purpose == BalancePurpose.CHECK
         balanceTest.start(t)
         return BalanceStart.STARTED
     }
@@ -291,7 +331,7 @@ class FitToDriveMonitor(
 
     fun resetLearning() {
         baseline.clear(); references.clear(); recent.clear(); cancelPractice()
-        lastCheck = null; lastBalance = null; advice = FitAdvice.NONE
+        lastCheck = null; lastBalance = null; advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE
         onEvent(FitToDriveEvent.StateChanged)
     }
 
@@ -318,6 +358,8 @@ class FitToDriveMonitor(
         walkMinutesNeeded = config.segmentsForProvisional * segmentSeconds / 60f,
         learningPaused = learningPaused,
         practice = practice,
+        recentlyWarned = recentlyWarned(t),
+        watchingDriving = enabled && inVehicleNow && drivingArmed(t),
         lastCheck = lastCheck,
         balanceRunning = balanceTest.running,
         balancePurpose = balancePurpose,
@@ -332,14 +374,36 @@ class FitToDriveMonitor(
     // ------------------------------------------------------------------ internals
     private fun secs(s: Float) = (s * 1e9f).toLong()
 
-    /** Trip start or car Bluetooth: remind if already warned, otherwise score the walk. */
+    /**
+     * Trip start or car Bluetooth: remind if warned (also within the hour after "I'm not
+     * driving": the person may drive anyway), otherwise score the walk.
+     */
     private fun beforeDrive(t: Long, trigger: CheckTrigger) {
-        if (warningActive) {
+        if (warningActive || recentlyWarned(t)) {
             recent.clear() // possibly impaired walking: never learned
-            onEvent(FitToDriveEvent.DrivingAfterWarning(trigger, advice))
+            // Vehicle detection flickers and Bluetooth reconnects: one reminder per trip.
+            if (lastReminderT == Long.MIN_VALUE || t - lastReminderT > secs(config.reminderCooldownSec)) {
+                lastReminderT = t
+                onEvent(FitToDriveEvent.DrivingAfterWarning(trigger, advice, dismissed = !warningActive))
+            }
             return
         }
         evaluate(t, trigger)
+    }
+
+    /** In a vehicle: track the driving; after a warning, report erratic driving (at most every 10 min). */
+    private fun watchDriving(t: Long, s: FloatArray, hasGyro: Boolean, inVehicle: Boolean) {
+        if (!inVehicle) {
+            if (inVehicleNow) drivingWatch.clear()
+            inVehicleNow = false
+            return
+        }
+        inVehicleNow = true
+        val e = drivingWatch.processSample(t, s, hasGyro) ?: return
+        if (!drivingArmed(t) || !drivingWatch.erratic(t)) return
+        if (lastErraticT != Long.MIN_VALUE && t - lastErraticT < secs(config.erraticCooldownSec)) return
+        lastErraticT = t
+        onEvent(FitToDriveEvent.ErraticDriving(drivingWatch.recentEvents(e.tNanos)))
     }
 
     /**
@@ -445,6 +509,7 @@ class FitToDriveMonitor(
             WalkLevel.LARGE_GAP -> {
                 advice = FitAdvice.TAKE_BALANCE_CHECK
                 adviceT = t
+                if (p == null) warnedT = t // a practice walk never arms the driving watch
             }
         }
         publishCheck(WalkCheck(wallClockOf(t), trigger, level, null, score, th.unusual, th.large,
@@ -463,6 +528,8 @@ class FitToDriveMonitor(
     private fun finishBalance(t: Long, m: BalanceMeasurement) {
         val purpose = balancePurpose ?: BalancePurpose.CHECK
         balancePurpose = null
+        val practiceBalance = balancePractice
+        balancePractice = false
         val wall = wallClockOf(t)
         var ratio = Float.NaN
         val outcome = when {
@@ -494,6 +561,10 @@ class FitToDriveMonitor(
                 else -> if (flagged) FitAdvice.DONT_DRIVE else advice
             }
             adviceT = t
+            when {
+                advice == FitAdvice.BALANCE_OK -> warnedT = Long.MIN_VALUE // normal balance: all clear
+                advice == FitAdvice.DONT_DRIVE && !practiceBalance -> warnedT = t
+            }
         }
         val result = BalanceResult(wall, purpose, outcome, m.swayAccel, m.swayGyro, ratio)
         lastBalance = result

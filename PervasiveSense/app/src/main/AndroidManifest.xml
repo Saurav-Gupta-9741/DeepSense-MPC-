@@ -19,11 +19,18 @@
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Fit to drive, opt-in contact alert: a text message, with the location if allowed. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -59,7 +66,7 @@
             android:name=".SensingForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="health" />
+            android:foregroundServiceType="health|location" />
 
         <!-- Receives Google Activity Recognition results through our own PendingIntent. -->
         <receiver

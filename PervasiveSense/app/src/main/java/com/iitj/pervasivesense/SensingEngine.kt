@@ -190,10 +190,12 @@ class SensingEngine(
         return ok
     }
 
+    fun confirmPassenger() = fitCommand { fitToDrive.confirmPassenger() }
+
     /** Null if no sensor data has arrived yet. Refused in a moving vehicle or (references) during a warning. */
-    fun startBalanceTest(purpose: BalancePurpose): BalanceStart? {
+    fun startBalanceTest(purpose: BalancePurpose, practice: Boolean = false): BalanceStart? {
         if (lastSampleT == Long.MIN_VALUE) return null
-        val result = fitToDrive.startBalanceTest(lastSampleT, purpose, inVehicle = isInVehicle(lastSampleT))
+        val result = fitToDrive.startBalanceTest(lastSampleT, purpose, inVehicle = isInVehicle(lastSampleT), practice = practice)
         publish(lastSampleT)
         return result
     }
@@ -247,7 +249,7 @@ class SensingEngine(
         if (inVehicle && !wasInVehicle) fitToDrive.onTripStart(t)
         wasInVehicle = inVehicle
         fitToDrive.processSample(t, s, walking = context == "WALKING", hasGyro = resampler.hasGyroData,
-            inPocket = !proximityAvailable || proximityNear)
+            inPocket = !proximityAvailable || proximityNear, inVehicle = inVehicle)
 
         samplesSinceInference++
         val stride = if (ecoMode) config.ecoStrideSamples else config.liveStrideSamples
