@@ -649,6 +649,30 @@ class FitToDriveMonitorTest {
     }
 
     @Test
+    fun theGuidedWalkSaysWhenItRecordsIsHalfwayAndDone() {
+        val m = monitor() // 15 segments (1 min) needed
+        assertTrue(m.startWalkRecording(start))
+        assertTrue(m.report().walkSession)
+        var t = feed(m, session1, start)
+        t = feed(m, session2, t + 1_000_000_000L)
+        val stages = events.filterIsInstance<FitToDriveEvent.WalkSession>().map { it.stage }
+        assertEquals(listOf(WalkSessionStage.RECORDING, WalkSessionStage.HALFWAY, WalkSessionStage.DONE), stages)
+        assertEquals(BaselineStatus.PROVISIONAL, m.report().baselineStatus)
+        assertFalse(m.report().walkSession)
+        assertFalse(m.startWalkRecording(t)) // already learned
+    }
+
+    @Test
+    fun theGuidedWalkSaysNothingIsRecordedThenGivesUp() {
+        val m = monitor()
+        assertTrue(m.startWalkRecording(start))
+        feed(m, Recording.constant(500.0, 0f, 0f, 9.81f), start, walking = false)
+        val stages = events.filterIsInstance<FitToDriveEvent.WalkSession>().map { it.stage }
+        assertEquals(listOf(WalkSessionStage.NOTHING_YET, WalkSessionStage.TIMED_OUT), stages)
+        assertFalse(m.report().walkSession)
+    }
+
+    @Test
     fun liveWalkStatusShowsWhetherTheWalkIsBeingRecorded() {
         val m = monitor()
         val s = FloatArray(6)
@@ -758,5 +782,48 @@ class FitToDriveEngineTest {
         for (ev in deviceEvents(session2, startNanos = 100_000_000_000L)) if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
         assertTrue(fit.count { it is FitToDriveEvent.SegmentMeasured } >= 10)
         assertFalse(snaps.last().fitToDrive.walkingOutsidePocket)
+    }
+
+    @Test
+    fun aWalkWithTheScreenOffIsAPocketWalkEvenIfProximityIsStuck() {
+        val fit = ArrayList<FitToDriveEvent>()
+        val e = SensingEngine(Energy(), wallClockOf = { it / 1_000_000 }, dayKeyOf = { "2026-10-23" },
+            listener = object : SensingEngine.Listener {
+                override fun onSnapshot(snapshot: SensingSnapshot) = Unit
+                override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) { fit += event }
+            })
+        e.setFitToDriveEnabled(true)
+        e.setProximityAvailable(true)
+        e.onProximity(false) // last reading before the screen went off: uncovered, never updated again
+        e.setScreenOn(false)
+        for (ev in deviceEvents(session2, startNanos = 1_000_000_000L)) if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
+        assertTrue(fit.count { it is FitToDriveEvent.SegmentMeasured } >= 10)
+    }
+
+    /** An activity model that never recognises walking. */
+    private class AlwaysStill : ActivityClassifier {
+        override val labels = listOf("STILL", "WALKING", "RUNNING", "STAIRS_UP", "STAIRS_DOWN")
+        override fun classify(window: FloatArray) = floatArrayOf(0.9f, 0.05f, 0.02f, 0.02f, 0.01f)
+    }
+
+    @Test
+    fun theGuidedWalkAlsoCountsStepsWhenTheActivityModelMissesTheWalk() {
+        fun measured(guided: Boolean): Int {
+            val fit = ArrayList<FitToDriveEvent>()
+            val e = SensingEngine(AlwaysStill(), wallClockOf = { it / 1_000_000 }, dayKeyOf = { "2026-10-23" },
+                listener = object : SensingEngine.Listener {
+                    override fun onSnapshot(snapshot: SensingSnapshot) = Unit
+                    override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) { fit += event }
+                })
+            e.setFitToDriveEnabled(true)
+            val evs = deviceEvents(session2, startNanos = 1_000_000_000L)
+            for ((k, ev) in evs.withIndex()) {
+                if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
+                if (k == 10 && guided) assertTrue(e.startWalkRecording())
+            }
+            return fit.count { it is FitToDriveEvent.SegmentMeasured }
+        }
+        assertEquals(0, measured(guided = false))
+        assertTrue(measured(guided = true) >= 8)
     }
 }

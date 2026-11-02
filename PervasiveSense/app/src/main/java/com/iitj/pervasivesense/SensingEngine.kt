@@ -122,6 +122,14 @@ class SensingEngine(
     // Proximity sensor: covered = phone in a pocket (fit-to-drive learns and scores pocket walks only).
     private var proximityAvailable = false
     private var proximityNear = false
+    /**
+     * Many phones stop reporting the proximity sensor once the screen is off, leaving it
+     * stuck at "uncovered" from the moment the phone was put away. A walk with the
+     * screen off is a pocket (or bag) walk: nobody walks holding a locked phone.
+     */
+    private var screenOn = true
+    /** Recent step times, so the guided set-up walk does not depend on the activity model alone. */
+    private val stepTimes = ArrayDeque<Long>()
 
     // ---------------------------------------------------------------- inputs
     override fun onAccelerometer(tNanos: Long, x: Float, y: Float, z: Float) = resampler.onAccelerometer(tNanos, x, y, z)
@@ -168,6 +176,7 @@ class SensingEngine(
     fun setProximityAvailable(available: Boolean) { proximityAvailable = available }
 
     fun onProximity(near: Boolean) { proximityNear = near }
+    fun setScreenOn(on: Boolean) { screenOn = on }
 
     /** A labelled study session (e.g. impairment goggles): measure and log, never learn. */
     fun setFitLearningPaused(paused: Boolean) {
@@ -191,6 +200,15 @@ class SensingEngine(
     }
 
     fun confirmPassenger() = fitCommand { fitToDrive.confirmPassenger() }
+    fun stopWalkRecording() = fitCommand { fitToDrive.stopWalkRecording() }
+
+    /** Set-up step 1, guided; false if the walk is already learned or no sensor data yet. */
+    fun startWalkRecording(): Boolean {
+        if (lastSampleT == Long.MIN_VALUE) return false
+        val ok = fitToDrive.startWalkRecording(lastSampleT)
+        publish(lastSampleT)
+        return ok
+    }
 
     /** Null if no sensor data has arrived yet. Refused in a moving vehicle or (references) during a warning. */
     fun startBalanceTest(purpose: BalancePurpose, practice: Boolean = false): BalanceStart? {
@@ -240,6 +258,8 @@ class SensingEngine(
             listener.onRoadAnomaly(e)
         }
         val newSteps = stepDetector.processSample(t, ax, ay, az)
+        if (newSteps > 0) stepTimes.addLast(t)
+        while (stepTimes.isNotEmpty() && t - stepTimes.first() > 3_000_000_000L) stepTimes.removeFirst()
         if (!hardwareSteps && !inVehicle) wellness.onSteps(newSteps)
 
         val fallConfirmed = fall.processSample(t, ax, ay, az)
@@ -248,8 +268,10 @@ class SensingEngine(
         // Fit-to-drive: score the walk that led up to a trip as soon as the trip is detected.
         if (inVehicle && !wasInVehicle) fitToDrive.onTripStart(t)
         wasInVehicle = inVehicle
-        fitToDrive.processSample(t, s, walking = context == "WALKING", hasGyro = resampler.hasGyroData,
-            inPocket = !proximityAvailable || proximityNear, inVehicle = inVehicle)
+        // During the guided set-up walk, steady stepping (≥ 4 steps in 3 s) also counts as walking.
+        val stepping = fitToDrive.walkSessionActive && !inVehicle && stepTimes.size >= 4
+        fitToDrive.processSample(t, s, walking = context == "WALKING" || stepping, hasGyro = resampler.hasGyroData,
+            inPocket = !proximityAvailable || proximityNear || !screenOn, inVehicle = inVehicle)
 
         samplesSinceInference++
         val stride = if (ecoMode) config.ecoStrideSamples else config.liveStrideSamples

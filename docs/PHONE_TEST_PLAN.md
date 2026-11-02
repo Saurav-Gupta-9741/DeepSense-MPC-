@@ -101,8 +101,8 @@ report after the vehicle starts moving.
 | # | Do this | Pass if |
 |---|---|---|
 | I1 | Dashboard, tap the **Fit to drive** card, turn the switch on, tap *Turn on* | *Set up (0 of 3 done)* appears |
-| I2 | Lock the screen, phone in a front trouser pocket, walk normally **2 min** | Step 1 shows ✓ (the banner says *Recording your walk* while you walk) |
-| I3 | Tap **Record balance (voice guided)** 3 times: feet together, phone flat on your chest, follow the voice | Step 2 shows ✓; *Before you drive* and *Test it* appear |
+| I2 | Tap **Start walk recording**, lock the screen, phone in a front trouser pocket, walk normally | Within about 15 s the phone says *Recording your walk*, then *Halfway there*, then *Your walk is recorded* (about 2 min); Step 1 shows ✓ and Step 2 unlocks |
+| I3 | Tap **Record balance (voice guided)** 3 times: **stand still**, feet together, phone flat on your chest, follow the voice | Step 2 shows ✓; Step 3 (contact) unlocks; *Before you drive* and *Test it* appear |
 | I4 | **Test it → A. Normal walk → Start**, lock the screen, walk normally ~30 s | The phone says *your walk looks normal*; row A shows ✓ |
 | I5 | **B. Wobbly walk → Start**, with someone next to you sway side to side with uneven steps ~30 s | The phone says *very different*; a notification and the *Take the balance check* card appear; row B shows ✓ |
 | I6 | **C. Balance check while swaying → Start** (or *Take the balance check*), sway gently from the hips | *Better not to drive now* with *Find a cab* (and *Call* / *Message* if a contact is saved); row C shows ✓. Tap *I'm not driving* to clear |
@@ -140,5 +140,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 99 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 103 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

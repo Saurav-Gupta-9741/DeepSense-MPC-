@@ -29,6 +29,10 @@ object FitToDriveStore {
     fun alertContact(c: Context) = prefs(c).getBoolean("alert_contact", false)
     fun setAlertContact(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alert_contact", on).apply()
 
+    /** Set-up step 3 (trusted contact) skipped. */
+    fun contactSkipped(c: Context) = prefs(c).getBoolean("contact_skipped", false)
+    fun setContactSkipped(c: Context, on: Boolean) = prefs(c).edit().putBoolean("contact_skipped", on).apply()
+
     fun contactName(c: Context): String = prefs(c).getString("contact_name", "") ?: ""
     fun contactPhone(c: Context): String = prefs(c).getString("contact_phone", "") ?: ""
     fun setContact(c: Context, name: String, phone: String) =

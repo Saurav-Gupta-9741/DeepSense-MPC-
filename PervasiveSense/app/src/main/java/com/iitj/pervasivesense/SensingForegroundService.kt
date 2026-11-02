@@ -92,6 +92,14 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     private var started = false
     private var fitDirty = false
     private var carReceiverRegistered = false
+    private var screenReceiverRegistered = false
+
+    /** Screen on/off: with the screen off a walk is a pocket walk (see SensingEngine.setScreenOn). */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            engine?.setScreenOn(intent.action == Intent.ACTION_SCREEN_ON)
+        }
+    }
     private var proximityRegistered = false
     private var studyCondition = StudyCondition.OFF
     private var studyParticipant = ""
@@ -216,6 +224,11 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         }
         startHardwareStepCounter(e)
         startVehicleDetection(e)
+        e.setScreenOn((getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive)
+        ContextCompat.registerReceiver(this, screenReceiver,
+            IntentFilter().apply { addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF) },
+            null, handler, ContextCompat.RECEIVER_NOT_EXPORTED)
+        screenReceiverRegistered = true
         updateFitSensors()
         updateWakeLock()
         SensingRepository.attach(this)
@@ -226,6 +239,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         imu?.stop()
         sensorManager.unregisterListener(stepListener)
         if (carReceiverRegistered) { unregisterReceiver(carBluetoothReceiver); carReceiverRegistered = false }
+        if (screenReceiverRegistered) { unregisterReceiver(screenReceiver); screenReceiverRegistered = false }
         if (proximityRegistered) { sensorManager.unregisterListener(proximityListener); proximityRegistered = false }
         vehiclePendingIntent?.let { pi ->
             try {
@@ -371,6 +385,13 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 // Connecting to one's own car is strong evidence of driving (a trip start may be a cab).
                 if (event.trigger == CheckTrigger.CAR_BLUETOOTH) alert().start(AlertKind.DRIVING_AFTER_WARNING)
             }
+            is FitToDriveEvent.WalkSession -> speak(getString(when (event.stage) {
+                WalkSessionStage.RECORDING -> R.string.fit_say_walk_recording
+                WalkSessionStage.HALFWAY -> R.string.fit_say_walk_half
+                WalkSessionStage.DONE -> R.string.fit_say_walk_done
+                WalkSessionStage.NOTHING_YET -> R.string.fit_say_walk_not_yet
+                WalkSessionStage.TIMED_OUT -> R.string.fit_say_walk_timeout
+            }), interrupt = false)
             is FitToDriveEvent.ErraticDriving -> {
                 notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_erratic_text), balanceAction = false)
                 if (!alert().start(AlertKind.ERRATIC_DRIVING)) speak(getString(R.string.fit_say_erratic))
@@ -395,13 +416,13 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         speak(getString(text))
     }
 
-    private fun speak(text: String) {
+    private fun speak(text: String, interrupt: Boolean = true) {
         val v = voice ?: FitVoice(this).also { voice = it }
-        v.say(text)
+        v.say(text, interrupt)
     }
 
     private fun alert(): ContactAlert = contactAlert ?: ContactAlert(this, handler, notificationManager, ALERT_CHANNEL_ID,
-        say = ::speak, onPassenger = { engine?.confirmPassenger() }).also { contactAlert = it }
+        say = { speak(it) }, onPassenger = { engine?.confirmPassenger() }).also { contactAlert = it }
 
     /**
      * Health, plus location while the contact alert may need it (the location of
@@ -542,6 +563,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     override fun requestFitCheck() { handler.post { engine?.requestFitCheck() } }
 
     override fun cancelContactAlert() { handler.post { contactAlert?.cancel(asPassenger = true) } }
+    override fun startWalkRecording() { handler.post { engine?.startWalkRecording() } }
+    override fun stopWalkRecording() { handler.post { engine?.stopWalkRecording() } }
 
     override fun sendTestAlert() {
         handler.post {

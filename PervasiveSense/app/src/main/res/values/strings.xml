@@ -140,7 +140,7 @@
 
     <string name="fit_balance_title_check">Balance check</string>
     <string name="fit_balance_title_reference">Recording your normal balance</string>
-    <string name="fit_balance_steps">Feet together, eyes open, phone flat on your chest. The phone speaks and beeps, so you don’t need to look.</string>
+    <string name="fit_balance_steps">Stand still – don’t walk. Feet together, eyes open, phone flat on your chest. The phone speaks and beeps, so you don’t need to look.</string>
     <string name="fit_balance_seconds">%1$d s</string>
     <string name="fit_balance_passed">Balance normal: %1$.1f× your usual sway</string>
     <string name="fit_balance_failed">Unsteady: %1$.1f× your usual sway</string>
@@ -191,11 +191,10 @@
     <string name="fit_limits_body" formatted="false">• Learns only your own walking: no drinking data is needed.\n• Compares side-to-side sway, step timing, stride regularity and turning with your normal walk; a check is unusual only if most of the walk is.\n• Flags unusual impairment, not alcohol itself, and only advises.\n• Never legal evidence. All processing stays on this phone.\n• Basis: in a lab study, phone sensors detected breath alcohol above 0.08% from walking with 92.5% accuracy; side-to-side sway was the strongest signal.</string>
 
     <string name="fit_setup_progress">Set up (%1$d of 3 done)</string>
-    <string name="fit_step1">1. Walk normally with the phone in your trouser pocket</string>
-    <string name="fit_step1_detail">%1$.1f of %2$.0f min recorded. It records by itself, even with the screen off.</string>
+    <string name="fit_step1">1. Record your walk (2 min)</string>
     <string name="fit_step1_done">Done. It keeps learning from your everyday walks.</string>
-    <string name="fit_step2">2. Record your normal balance</string>
-    <string name="fit_step2_detail">%1$d of %2$d recordings. Do it when rested and sober. The phone talks you through it.</string>
+    <string name="fit_step2">2. Record your standing balance</string>
+    <string name="fit_step2_detail">%1$d of %2$d recordings. Stand still – this is not a walk. Feet together, phone flat on your chest, when rested and sober. The phone talks you through it.</string>
     <string name="fit_step2_done">Done (%1$d of %2$d).</string>
     <string name="fit_step3">3. Trusted contact (optional)</string>
     <string name="fit_step3_detail">Someone to call or message if you shouldn’t drive.</string>
@@ -211,7 +210,7 @@
     <string name="fit_no_check_yet">No check yet</string>
     <string name="fit_balance_get_ready">Get into position</string>
     <string name="fit_balance_hold">Hold still</string>
-    <string name="fit_say_start_reference">Recording your normal balance. Stand with your feet together and hold the phone flat on your chest.</string>
+    <string name="fit_say_start_reference">Recording your standing balance. Stand still, do not walk. Feet together, and hold the phone flat on your chest.</string>
     <string name="fit_say_start_check">Balance check. Stand with your feet together and hold the phone flat on your chest.</string>
     <string name="fit_say_hold">Now hold still.</string>
     <string name="fit_say_ten">Ten seconds left.</string>
@@ -283,6 +282,20 @@
     <string name="fit_say_alert_sent">Your contact has been sent a message.</string>
     <string name="fit_say_alert_failed">The message could not be sent.</string>
     <string name="fit_say_alert_cancelled">Alert cancelled.</string>
+    <string name="fit_step1_how">Tap Start, lock the screen, put the phone in your trouser pocket and walk normally. The phone tells you when it’s done.</string>
+    <string name="fit_step1_so_far"> %1$.1f of %2$.0f min so far.</string>
+    <string name="fit_step1_recording">Recording: %1$.1f of %2$.0f min. Keep walking (screen locked is fine).</string>
+    <string name="fit_step1_waiting">Started. Lock the screen, put the phone in your trouser pocket and walk. %1$.1f of %2$.0f min so far.</string>
+    <string name="fit_step1_start">Start walk recording</string>
+    <string name="fit_step1_stop">Stop walk recording</string>
+    <string name="fit_step_locked">Unlocks after step %1$d.</string>
+    <string name="fit_skip">Skip</string>
+    <string name="fit_say_walk_start">Step 1. Lock the screen, put the phone in your trouser pocket and walk normally for 2 minutes. I will tell you when it is done.</string>
+    <string name="fit_say_walk_recording">Recording your walk. Keep walking.</string>
+    <string name="fit_say_walk_half">Halfway there. Keep walking.</string>
+    <string name="fit_say_walk_done">Your walk is recorded. Take out the phone for step 2.</string>
+    <string name="fit_say_walk_not_yet">Nothing recorded yet. Keep the phone in your trouser pocket and walk at your normal pace.</string>
+    <string name="fit_say_walk_timeout">Walk recording stopped. Open the app to try again.</string>
     <!-- Activity log -->
     <string name="section_log">Activity log</string>
     <string name="card_transitions">Last change</string>

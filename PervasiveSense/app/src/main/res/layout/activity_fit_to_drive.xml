@@ -327,6 +327,17 @@
                         android:layout_marginTop="6dp"
                         android:max="100" />
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStep1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/fit_step1_start"
+                        android:textColor="@color/bg_dark"
+                        app:backgroundTint="@color/primary_cyan"
+                        app:cornerRadius="12dp" />
+
                     <!-- Step 2: normal balance -->
                     <TextView
                         android:id="@+id/tvStep2"
@@ -384,6 +395,15 @@
                         android:text="@string/fit_add_contact"
                         android:textColor="@color/text_main"
                         app:cornerRadius="12dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStep3Skip"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:text="@string/fit_skip"
+                        android:textColor="@color/text_muted" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

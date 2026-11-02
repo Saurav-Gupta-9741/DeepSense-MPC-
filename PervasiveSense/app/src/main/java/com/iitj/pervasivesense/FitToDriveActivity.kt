@@ -55,6 +55,8 @@ class FitToDriveActivity : AppCompatActivity() {
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     private var voice: FitVoice? = null
     private var bindingUi = false
+    /** The last report rendered (for buttons whose action depends on it). */
+    private var lastReport: FitToDriveReport? = null
 
     // Balance test progress, for the spoken cues.
     private var balanceWasRunning = false
@@ -117,6 +119,19 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.switchAlertContact.setOnCheckedChangeListener { _, on -> if (!bindingUi) onAlertToggled(on) }
         binding.btnTestAlert.setOnClickListener { SensingRepository.sendTestAlert() }
         binding.btnAlertCancel.setOnClickListener { SensingRepository.cancelContactAlert() }
+        binding.btnStep1.setOnClickListener {
+            if (lastReport?.walkSession == true) {
+                SensingRepository.stopWalkRecording()
+                voice?.stop()
+            } else {
+                SensingRepository.startWalkRecording()
+                say(getString(R.string.fit_say_walk_start))
+            }
+        }
+        binding.btnStep3Skip.setOnClickListener {
+            FitToDriveStore.setContactSkipped(this, true)
+            render(SensingRepository.status.value, SensingRepository.snapshot.value, SensingRepository.message.value)
+        }
         binding.btnStep2.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnRecordAgain.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnStep3.setOnClickListener { focusContact() }
@@ -354,6 +369,7 @@ class FitToDriveActivity : AppCompatActivity() {
 
     private fun render(status: ServiceStatus, s: SensingSnapshot?, message: String?) = with(binding) {
         val f = s?.fitToDrive
+        lastReport = f
         val running = status == ServiceStatus.RUNNING && f != null
         val enabled = FitToDriveStore.isEnabled(this@FitToDriveActivity)
         val busy = f?.balanceRunning == true
@@ -433,36 +449,64 @@ class FitToDriveActivity : AppCompatActivity() {
         btnAlertCancel.setText(if (a.kind == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel)
     }
 
+    /** Set-up, one step after another: walk, then standing balance, then the contact (optional). */
     private fun renderSetup(f: FitToDriveReport, canAct: Boolean) = with(binding) {
+        val ctx = this@FitToDriveActivity
         val walkDone = f.baselineStatus != BaselineStatus.LEARNING
         val balanceDone = f.balanceReferences >= f.balanceReferencesNeeded
-        val phone = FitToDriveStore.contactPhone(this@FitToDriveActivity)
+        val phone = FitToDriveStore.contactPhone(ctx)
         val contactDone = phone.isNotBlank()
-        // The contact is optional: set up is complete once walk and balance are done.
-        cardSetup.visibility = if (walkDone && balanceDone) View.GONE else View.VISIBLE
-        if (walkDone && balanceDone) return@with
+        val complete = walkDone && balanceDone && (contactDone || FitToDriveStore.contactSkipped(ctx))
+        cardSetup.visibility = if (complete) View.GONE else View.VISIBLE
+        if (complete) return@with
         tvSetupTitle.text = getString(R.string.fit_setup_progress, listOf(walkDone, balanceDone, contactDone).count { it })
-        fun mark(done: Boolean, text: String) = (if (done) "✓  " else "●  ") + text
 
-        tvStep1.text = mark(walkDone, getString(R.string.fit_step1))
-        tvStep1.setTextColor(color(if (walkDone) R.color.accent_emerald else R.color.text_main))
-        tvStep1Detail.text = if (walkDone) getString(R.string.fit_step1_done)
-            else getString(R.string.fit_step1_detail, minOf(f.baselineWalkMinutes, f.walkMinutesNeeded), f.walkMinutesNeeded)
+        fun step(title: android.widget.TextView, text: String, done: Boolean, active: Boolean) {
+            title.text = (if (done) "✓  " else if (active) "▶  " else "○  ") + text
+            title.setTextColor(color(when {
+                done -> R.color.accent_emerald
+                active -> R.color.text_main
+                else -> R.color.text_muted
+            }))
+        }
+
+        // Step 1: walk (also learned from everyday pocket walks, but the button guides it).
+        step(tvStep1, getString(R.string.fit_step1), walkDone, !walkDone)
+        val minutes = minOf(f.baselineWalkMinutes, f.walkMinutesNeeded)
+        tvStep1Detail.text = when {
+            walkDone -> getString(R.string.fit_step1_done)
+            f.walkSession && f.recordingWalk -> getString(R.string.fit_step1_recording, minutes, f.walkMinutesNeeded)
+            f.walkSession -> getString(R.string.fit_step1_waiting, minutes, f.walkMinutesNeeded)
+            minutes > 0f -> getString(R.string.fit_step1_how) + getString(R.string.fit_step1_so_far, minutes, f.walkMinutesNeeded)
+            else -> getString(R.string.fit_step1_how)
+        }
         progressStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
         progressStep1.progress = pct(f.baselineSegments.toFloat() / f.segmentsForProvisional)
+        btnStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
+        btnStep1.setText(if (f.walkSession) R.string.fit_step1_stop else R.string.fit_step1_start)
+        btnStep1.isEnabled = canAct
 
-        tvStep2.text = mark(balanceDone, getString(R.string.fit_step2))
-        tvStep2.setTextColor(color(if (balanceDone) R.color.accent_emerald else R.color.text_main))
-        tvStep2Detail.text = if (balanceDone) getString(R.string.fit_step2_done, f.balanceReferences, f.balanceReferencesNeeded)
-            else getString(R.string.fit_step2_detail, f.balanceReferences, f.balanceReferencesNeeded)
-        btnStep2.visibility = if (balanceDone) View.GONE else View.VISIBLE
+        // Step 2: standing balance, after the walk.
+        val step2Active = walkDone && !balanceDone
+        step(tvStep2, getString(R.string.fit_step2), balanceDone, step2Active)
+        tvStep2Detail.text = when {
+            balanceDone -> getString(R.string.fit_step2_done, f.balanceReferences, f.balanceReferencesNeeded)
+            !walkDone -> getString(R.string.fit_step_locked, 1)
+            else -> getString(R.string.fit_step2_detail, f.balanceReferences, f.balanceReferencesNeeded)
+        }
+        btnStep2.visibility = if (step2Active) View.VISIBLE else View.GONE
         btnStep2.isEnabled = canAct
 
-        tvStep3.text = mark(contactDone, getString(R.string.fit_step3))
-        tvStep3.setTextColor(color(if (contactDone) R.color.accent_emerald else R.color.text_main))
-        tvStep3Detail.text = if (contactDone) FitToDriveStore.contactName(this@FitToDriveActivity).ifBlank { phone }
-            else getString(R.string.fit_step3_detail)
-        btnStep3.visibility = if (contactDone) View.GONE else View.VISIBLE
+        // Step 3: trusted contact (optional), after the balance.
+        val step3Active = walkDone && balanceDone && !contactDone
+        step(tvStep3, getString(R.string.fit_step3), contactDone, step3Active)
+        tvStep3Detail.text = when {
+            contactDone -> FitToDriveStore.contactName(ctx).ifBlank { phone }
+            !(walkDone && balanceDone) -> getString(R.string.fit_step_locked, 2)
+            else -> getString(R.string.fit_step3_detail)
+        }
+        btnStep3.visibility = if (step3Active) View.VISIBLE else View.GONE
+        btnStep3Skip.visibility = if (step3Active) View.VISIBLE else View.GONE
     }
 
     private fun renderAdvice(f: FitToDriveReport, inVehicle: Boolean) = with(binding) {
@@ -580,7 +624,7 @@ class FitToDriveActivity : AppCompatActivity() {
 
     /** "Before you drive": only once the normal walk is learned, so a check can give an answer. */
     private fun renderCheck(f: FitToDriveReport, canAct: Boolean) = with(binding) {
-        val ready = f.baselineStatus != BaselineStatus.LEARNING
+        val ready = f.baselineStatus != BaselineStatus.LEARNING && f.balanceReferences >= f.balanceReferencesNeeded
         cardCheck.visibility = if (ready) View.VISIBLE else View.GONE
         if (!ready) return@with
         btnCheckNow.isEnabled = canAct && !f.waitingForWalk
