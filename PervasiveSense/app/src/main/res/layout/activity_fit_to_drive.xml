@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fit to drive, top to bottom:
+    banner (problems / live walk status) · advice · balance test in progress ·
+    set up (3 steps, until done) · before you drive (after set up) · settings · study · limits
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -46,6 +51,7 @@
     </LinearLayout>
 
     <ScrollView
+        android:id="@+id/scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -60,18 +66,37 @@
             android:paddingEnd="16dp"
             android:paddingBottom="16dp">
 
-            <TextView
-                android:id="@+id/tvBanner"
+            <!-- Banner: problems first, otherwise the live walk status -->
+            <LinearLayout
+                android:id="@+id/banner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
                 android:background="@drawable/bg_tile"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
                 android:padding="12dp"
-                android:textColor="@color/accent_amber"
-                android:textSize="13sp"
-                android:visibility="gone" />
+                android:visibility="gone">
 
-            <!-- Advice: shown only when there is something to act on -->
+                <TextView
+                    android:id="@+id/tvBanner"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="@color/accent_amber"
+                    android:textSize="14sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnBanner"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:textColor="@color/primary_glow"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- Advice: only when there is something to act on -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardAdvice"
                 style="@style/PS.Card"
@@ -107,6 +132,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
+                        android:text="@string/fit_no_contact"
                         android:visibility="gone" />
 
                     <com.google.android.material.button.MaterialButton
@@ -143,7 +169,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Balance test in progress -->
+            <!-- Balance test in progress: large, readable at arm's length, spoken as well -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardBalance"
                 style="@style/PS.Card"
@@ -154,8 +180,9 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
                     android:orientation="vertical"
-                    android:padding="18dp">
+                    android:padding="20dp">
 
                     <TextView
                         android:id="@+id/tvBalanceTitle"
@@ -164,37 +191,40 @@
                         android:layout_height="wrap_content" />
 
                     <TextView
-                        style="@style/PS.Caption"
+                        android:id="@+id/tvBalancePhase"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/fit_balance_steps"
-                        android:textSize="13sp" />
+                        android:layout_marginTop="10dp"
+                        android:gravity="center"
+                        android:textColor="@color/accent_amber"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
 
                     <TextView
                         android:id="@+id/tvBalanceCountdown"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_gravity="center_horizontal"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="4dp"
                         android:textColor="@color/text_main"
-                        android:textSize="48sp"
+                        android:textSize="64sp"
                         android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvBalancePhase"
-                        style="@style/PS.Caption"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="center_horizontal" />
 
                     <com.google.android.material.progressindicator.LinearProgressIndicator
                         android:id="@+id/progressBalance"
                         style="@style/PS.Bar"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="8dp"
                         android:max="100" />
+
+                    <TextView
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center"
+                        android:text="@string/fit_balance_steps"
+                        android:textSize="13sp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnBalanceCancel"
@@ -207,7 +237,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Set up: shown until walk, balance references and contact are in place -->
+            <!-- Set up: three steps, shown until done -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardSetup"
                 style="@style/PS.Card"
@@ -222,52 +252,105 @@
                     android:padding="16dp">
 
                     <TextView
+                        android:id="@+id/tvSetupTitle"
                         style="@style/PS.CardTitle"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/fit_setup_title" />
+                        android:layout_height="wrap_content" />
 
+                    <!-- Step 1: walk -->
                     <TextView
-                        android:id="@+id/tvSetupWalk"
+                        android:id="@+id/tvStep1"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="12dp"
                         android:textColor="@color/text_main"
-                        android:textSize="14sp" />
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
 
                     <TextView
-                        android:id="@+id/tvSetupBalance"
+                        android:id="@+id/tvStep1Detail"
+                        style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:textColor="@color/text_main"
-                        android:textSize="14sp" />
+                        android:layout_marginStart="22dp"
+                        android:textSize="13sp" />
 
-                    <TextView
-                        android:id="@+id/tvSetupContact"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:textColor="@color/text_main"
-                        android:textSize="14sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSetupRecord"
+                    <com.google.android.material.progressindicator.LinearProgressIndicator
+                        android:id="@+id/progressStep1"
+                        style="@style/PS.Bar"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/fit_setup_dialog_ok"
+                        android:layout_marginStart="22dp"
+                        android:layout_marginTop="6dp"
+                        android:max="100" />
+
+                    <!-- Step 2: normal balance -->
+                    <TextView
+                        android:id="@+id/tvStep2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:textColor="@color/text_main"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvStep2Detail"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStep2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/fit_record_balance"
                         android:textColor="@color/bg_dark"
                         app:backgroundTint="@color/primary_cyan"
+                        app:cornerRadius="12dp" />
+
+                    <!-- Step 3: trusted contact (optional) -->
+                    <TextView
+                        android:id="@+id/tvStep3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:textColor="@color/text_main"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvStep3Detail"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStep3"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/fit_add_contact"
+                        android:textColor="@color/text_main"
                         app:cornerRadius="12dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Last check -->
+            <!-- Before you drive: available once the normal walk is learned -->
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardCheck"
                 style="@style/PS.Card"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content">
+                android:layout_height="wrap_content"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -275,58 +358,18 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            style="@style/PS.CardTitle"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/fit_last_title" />
-
-                        <View
-                            android:id="@+id/levelDot"
-                            android:layout_width="10dp"
-                            android:layout_height="10dp"
-                            android:background="@drawable/bg_dot" />
-                    </LinearLayout>
-
                     <TextView
-                        android:id="@+id/tvLastLevel"
+                        style="@style/PS.CardTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:textColor="@color/text_main"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
+                        android:text="@string/fit_before_drive" />
 
                     <TextView
-                        android:id="@+id/tvLastDetail"
                         style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:textSize="13sp" />
-
-                    <TextView
-                        android:id="@+id/tvLastMeta"
-                        style="@style/PS.Caption"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp" />
-
-                    <TextView
-                        android:id="@+id/tvLastBalance"
-                        style="@style/PS.Caption"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:textColor="@color/text_main"
-                        android:visibility="gone" />
+                        android:text="@string/fit_before_drive_hint" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -355,72 +398,67 @@
                             android:textColor="@color/text_main"
                             app:cornerRadius="12dp" />
                     </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
 
-            <!-- Your normal walk -->
-            <com.google.android.material.card.MaterialCardView
-                style="@style/PS.Card"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        style="@style/PS.CardTitle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/fit_normal_title" />
-
-                    <TextView
-                        android:id="@+id/tvBaselineStatus"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textColor="@color/text_main"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.progressindicator.LinearProgressIndicator
-                        android:id="@+id/progressBaseline"
-                        style="@style/PS.Bar"
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:max="100" />
+                        android:layout_marginTop="14dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/levelDot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:layout_marginEnd="8dp"
+                            android:background="@drawable/bg_dot" />
+
+                        <TextView
+                            android:id="@+id/tvLastLevel"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textColor="@color/text_main"
+                            android:textSize="17sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
 
                     <TextView
-                        android:id="@+id/tvBaselineDetail"
+                        android:id="@+id/tvLastDetail"
                         style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp" />
+                        android:layout_marginTop="2dp"
+                        android:textSize="13sp" />
 
                     <TextView
-                        android:id="@+id/tvBalanceRefs"
+                        android:id="@+id/tvLastMeta"
                         style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnRecordReference"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:id="@+id/tvLastBalance"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/fit_record_reference"
+                        android:layout_marginTop="6dp"
                         android:textColor="@color/text_main"
-                        app:cornerRadius="12dp" />
+                        android:textSize="13sp"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvLearned"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
             <!-- Settings -->
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardSettings"
                 style="@style/PS.Card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
@@ -453,6 +491,7 @@
                     </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilContactPhone"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -512,11 +551,19 @@
                     </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnReset"
+                        android:id="@+id/btnRecordAgain"
                         style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
+                        android:text="@string/fit_record_again"
+                        android:textColor="@color/primary_glow" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnReset"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
                         android:text="@string/fit_reset"
                         android:textColor="@color/accent_rose" />
                 </LinearLayout>

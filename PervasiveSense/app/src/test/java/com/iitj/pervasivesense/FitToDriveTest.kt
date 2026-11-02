@@ -471,6 +471,41 @@ class FitToDriveMonitorTest {
         assertFalse(m.report().walkingOutsidePocket)
     }
 
+    // ---------------------------------------------------------------- set up
+
+    @Test
+    fun duringSetUpEveryPocketWalkCountsAtOnce() {
+        val m = monitor() // 15 segments (1 min) needed
+        assertEquals(1f, m.report().walkMinutesNeeded, 0.01f)
+        feed(m, session1, start) // 30 s of walking, no waiting period
+        assertEquals(6, m.report().baselineSegments)
+        assertEquals(BaselineStatus.LEARNING, m.report().baselineStatus)
+        // A trip start during set up learns nothing twice.
+        m.onTripStart(start + 31_000_000_000L)
+        assertEquals(6, m.report().baselineSegments)
+    }
+
+    @Test
+    fun liveWalkStatusShowsWhetherTheWalkIsBeingRecorded() {
+        val m = monitor()
+        val s = FloatArray(6)
+        session1.data[0].copyInto(s)
+        m.processSample(start, s, walking = true, hasGyro = true, inPocket = true)
+        assertTrue(m.report().recordingWalk)
+        m.processSample(start + 20_000_000L, s, walking = true, hasGyro = true, inPocket = false)
+        assertFalse(m.report().recordingWalk)
+        m.processSample(start + 40_000_000L, s, walking = false, hasGyro = true, inPocket = true)
+        assertFalse(m.report().recordingWalk)
+    }
+
+    @Test
+    fun threeNormalBalanceRecordingsAreKeptNewestReplacingOldest() {
+        val m = monitor()
+        for (k in 0 until 4) balance(m, BalancePurpose.REFERENCE, stance(31.0, 0.08, seed = 20 + k), start + k * 40_000_000_000L)
+        assertEquals(3, m.report().balanceReferences)
+        assertEquals(3, m.report().balanceReferencesNeeded)
+    }
+
     @Test
     fun balanceProgressIsReported() {
         val m = monitor()

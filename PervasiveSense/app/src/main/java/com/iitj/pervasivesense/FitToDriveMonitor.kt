@@ -60,6 +60,10 @@ data class FitToDriveReport(
     val waitingForWalk: Boolean,
     /** Walking, but the phone is not in a pocket: this walk is not used. */
     val walkingOutsidePocket: Boolean,
+    /** Walking with the phone in a pocket right now: this walk is being recorded. */
+    val recordingWalk: Boolean,
+    /** Minutes of pocket walking needed before checks can run. */
+    val walkMinutesNeeded: Float,
     /** A study session is labelled: nothing is learned. */
     val learningPaused: Boolean,
     val lastCheck: WalkCheck?,
@@ -68,7 +72,8 @@ data class FitToDriveReport(
     val balanceProgress: Float,
     val balanceSecondsLeft: Int,
     val balanceReferences: Int,
-    val balanceReferencesRecommended: Int,
+    /** Normal-balance recordings needed (and kept: newer ones replace the oldest). */
+    val balanceReferencesNeeded: Int,
     val lastBalance: BalanceResult?,
     val advice: FitAdvice
 )
@@ -92,10 +97,11 @@ class FitToDriveState(val baseline: List<BaselineEntry>, val balanceReferences: 
  *
  *  1. Learn normal: while enabled, every segment of everyday walking with the
  *     phone in a pocket is added to the user's own [GaitBaseline] (up to a
- *     daily quota so one long walk cannot dominate). Segments are quarantined
- *     first: they are learned only once they leave the pre-drive window
- *     unflagged, so the walk being scored is never part of the "normal" it is
- *     compared with. A scored walk is learned only if it was normal, so
+ *     daily quota so one long walk cannot dominate). While the baseline is
+ *     still being learned (nothing can be checked yet) segments are learned at
+ *     once. After that they are quarantined first: learned only once they leave
+ *     the pre-drive window unflagged, so the walk being scored is never part of
+ *     the "normal" it is compared with. A scored walk is learned only if it was normal, so
  *     slightly impaired evenings never drift into "normal". Nothing is learned
  *     while a warning or offer is active or during a labelled study session.
  *  2. Watch the walk: the segments of the last [Config.lookbackSec] are kept.
@@ -127,14 +133,15 @@ class FitToDriveMonitor(
         val manualWaitSec: Float = 180f,
         val adviceExpirySec: Float = 3600f,
         val balanceFailRatio: Float = 1.75f,
-        val maxBalanceReferences: Int = 5,
-        val recommendedBalanceReferences: Int = 3,
+        val balanceReferences: Int = 3,
         val maxPerDay: Int = 150
     )
 
     private val extractor = GaitSegmentExtractor()
     private val baseline = GaitBaseline(maxPerDay = config.maxPerDay)
-    private val recent = ArrayDeque<Pair<GaitSegment, Long>>() // segment + wall-clock time
+    /** A segment of the last [Config.lookbackSec]; [learned] if it already went into the baseline (setup). */
+    private class Recent(val seg: GaitSegment, val wall: Long, val learned: Boolean)
+    private val recent = ArrayDeque<Recent>()
     private val balanceTest = BalanceTest()
     private var balancePurpose: BalancePurpose? = null
     private val references = ArrayList<BalanceReference>()
@@ -150,6 +157,8 @@ class FitToDriveMonitor(
     private var waitUntil = Long.MIN_VALUE
     private var lastT = Long.MIN_VALUE
     private var outsidePocketSince = Long.MIN_VALUE
+    private var walkingNow = false
+    private var inPocketNow = true
 
     private val segmentSeconds get() = extractor.hopSamples / 50f
     private val warningActive get() = advice == FitAdvice.TAKE_BALANCE_CHECK || advice == FitAdvice.DONT_DRIVE
@@ -184,14 +193,20 @@ class FitToDriveMonitor(
             advice = FitAdvice.NONE
         }
         if (!enabled) return
+        walkingNow = walking
+        inPocketNow = inPocket
         outsidePocketSince = if (walking && !inPocket) (if (outsidePocketSince == Long.MIN_VALUE) t else outsidePocketSince) else Long.MIN_VALUE
         if (waitUntil != Long.MIN_VALUE && t > waitUntil) {
             waitUntil = Long.MIN_VALUE
             publishCheck(notScoredCheck(t, CheckTrigger.MANUAL, NotScoredReason.NO_RECENT_WALK))
         }
-        if (recent.isNotEmpty() && t - recent.first().first.tEndNanos > secs(config.lookbackSec)) pruneRecent(t)
+        if (recent.isNotEmpty() && t - recent.first().seg.tEndNanos > secs(config.lookbackSec)) pruneRecent(t)
         val seg = extractor.processSample(t, s, walking && inPocket, hasGyro) ?: return
-        recent.addLast(seg to wallClockOf(t))
+        val wall = wallClockOf(t)
+        // Setup: nothing can be checked yet, so there is no walk to protect; learn at once.
+        val learnedNow = status() == BaselineStatus.LEARNING && learn(seg, wall)
+        if (learnedNow) onEvent(FitToDriveEvent.StateChanged)
+        recent.addLast(Recent(seg, wall, learnedNow))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         if (waitUntil != Long.MIN_VALUE && recent.size >= config.minWalkSegments) {
             waitUntil = Long.MIN_VALUE
@@ -241,7 +256,7 @@ class FitToDriveMonitor(
 
     fun restore(state: FitToDriveState) {
         baseline.restore(state.baseline)
-        references.clear(); references.addAll(state.balanceReferences.takeLast(config.maxBalanceReferences))
+        references.clear(); references.addAll(state.balanceReferences.takeLast(config.balanceReferences))
     }
 
     fun report(t: Long = lastT) = FitToDriveReport(
@@ -256,6 +271,8 @@ class FitToDriveMonitor(
         waitingForWalk = waitUntil != Long.MIN_VALUE,
         // A few seconds of grace: putting the phone away is not "walking with it in the hand".
         walkingOutsidePocket = outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > 3_000_000_000L,
+        recordingWalk = enabled && walkingNow && inPocketNow,
+        walkMinutesNeeded = config.segmentsForProvisional * segmentSeconds / 60f,
         learningPaused = learningPaused,
         lastCheck = lastCheck,
         balanceRunning = balanceTest.running,
@@ -263,7 +280,7 @@ class FitToDriveMonitor(
         balanceProgress = balanceTest.progress(t),
         balanceSecondsLeft = balanceTest.secondsLeft(t),
         balanceReferences = references.size,
-        balanceReferencesRecommended = config.recommendedBalanceReferences,
+        balanceReferencesNeeded = config.balanceReferences,
         lastBalance = lastBalance,
         advice = advice
     )
@@ -284,9 +301,9 @@ class FitToDriveMonitor(
     /** Segments leaving the pre-drive window unflagged become part of the baseline. */
     private fun pruneRecent(t: Long) {
         var learned = false
-        while (recent.isNotEmpty() && t - recent.first().first.tEndNanos > secs(config.lookbackSec)) {
-            val (seg, wall) = recent.removeFirst()
-            learned = learn(seg, wall) || learned
+        while (recent.isNotEmpty() && t - recent.first().seg.tEndNanos > secs(config.lookbackSec)) {
+            val r = recent.removeFirst()
+            if (!r.learned) learned = learn(r.seg, r.wall) || learned
         }
         if (learned) onEvent(FitToDriveEvent.StateChanged)
     }
@@ -301,9 +318,9 @@ class FitToDriveMonitor(
         return baseline.add(BaselineEntry(wall, dayKeyOf(wall), seg.values))
     }
 
-    private fun learnAll(segments: List<Pair<GaitSegment, Long>>) {
+    private fun learnAll(segments: List<Recent>) {
         var learned = false
-        for ((seg, wall) in segments) learned = learn(seg, wall) || learned
+        for (r in segments) if (!r.learned) learned = learn(r.seg, r.wall) || learned
         if (learned) onEvent(FitToDriveEvent.StateChanged)
     }
 
@@ -323,8 +340,8 @@ class FitToDriveMonitor(
         val zSum = DoubleArray(GaitFeature.COUNT)
         val zN = IntArray(GaitFeature.COUNT)
         val distances = FloatArray(walk.size)
-        for ((k, pair) in walk.withIndex()) {
-            val d = baseline.deviation(pair.first.values) ?: return false
+        for ((k, r) in walk.withIndex()) {
+            val d = baseline.deviation(r.seg.values) ?: return false
             distances[k] = d.distance
             for (i in 0 until GaitFeature.COUNT) if (!d.z[i].isNaN()) { zSum[i] = zSum[i] + d.z[i]; zN[i]++ }
         }
@@ -382,7 +399,7 @@ class FitToDriveMonitor(
                     BalanceOutcome.REFERENCE_REJECTED
                 } else {
                     references += BalanceReference(wall, m.swayAccel, m.swayGyro)
-                    while (references.size > config.maxBalanceReferences) references.removeAt(0)
+                    while (references.size > config.balanceReferences) references.removeAt(0)
                     onEvent(FitToDriveEvent.StateChanged)
                     BalanceOutcome.REFERENCE_SAVED
                 }

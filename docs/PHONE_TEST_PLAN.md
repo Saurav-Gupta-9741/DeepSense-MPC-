@@ -100,9 +100,9 @@ report after the vehicle starts moving.
 
 | # | Do this | Pass if |
 |---|---|---|
-| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the dashboard card shows *Learning your normal walk* |
-| I2 | Walk normally 3 min with the phone in a front trouser pocket, then wait 5 min | *Your normal walk* shows *Checking, still learning*; minutes learned increase |
-| I3 | Record normal balance (feet together, phone flat on chest, 30 s) | Beep at start and end; *Saved your normal balance (1 of 5)* |
+| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the *Set up (0 of 3 done)* card appears |
+| I2 | Put the phone in a front trouser pocket and walk normally for 2 min | Step 1 shows *x of 2 min recorded* rising right away; with the phone in the hand the banner says *Not recording* |
+| I3 | Tap **Record balance (voice guided)** three times (feet together, phone flat on chest) | The phone speaks each step and the result; Step 2 shows *1 of 3*, *2 of 3*, then ✓; *Before you drive* appears when steps 1 and 2 are done |
 | I4 | Walk normally 30 s, tap **Check my walk** | *Normal for you* (or *Unusual*); the time and walking seconds are shown |
 | I5 | Wear impairment-simulation goggles (with a spotter) or walk deliberately unsteadily, swaying side to side with irregular steps, for 30 s; tap **Check my walk** | *Very different from your normal*, an amber *Take the balance check* card, the features that differed most |
 | I6 | Balance check while swaying | *Better not to drive now* with *Find a cab*; with a trusted contact saved, *Call* and *Message* open the dialer / SMS app with the number filled in |
@@ -119,5 +119,5 @@ report after the vehicle starts moving.
 
 ## Automated tests (run on every GitHub push)
 
-- 82 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 85 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)
