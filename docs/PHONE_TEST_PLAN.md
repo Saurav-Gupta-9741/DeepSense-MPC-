@@ -96,10 +96,28 @@ report after the vehicle starts moving.
 | H1 | Deny *Physical activity* (Android 14+) | Clear message above the button explaining it is required; no crash |
 | H2 | Deny *Physical activity* (Android 10–13) | Sensing starts; Road hazards says it needs the permission |
 
-## I. Fit-to-drive check (**never drive for these tests**)
+## I. Fit-to-drive check (**never drive for these tests**, about 10 min)
 
 | # | Do this | Pass if |
 |---|---|---|
+| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on, tap *Turn on* | *Set up (0 of 3 done)* appears |
+| I2 | Lock the screen, phone in a front trouser pocket, walk normally **2 min** | Step 1 shows ✓ (the banner says *Recording your walk* while you walk) |
+| I3 | Tap **Record balance (voice guided)** 3 times: feet together, phone flat on your chest, follow the voice | Step 2 shows ✓; *Before you drive* and *Test it* appear |
+| I4 | **Test it → A. Normal walk → Start**, lock the screen, walk normally ~30 s | The phone says *your walk looks normal*; row A shows ✓ |
+| I5 | **B. Wobbly walk → Start**, with someone next to you sway side to side with uneven steps ~30 s | The phone says *very different*; a notification and the *Take the balance check* card appear; row B shows ✓ |
+| I6 | **C. Balance check while swaying → Start** (or *Take the balance check*), sway gently from the hips | *Better not to drive now* with *Find a cab* (and *Call* / *Message* if a contact is saved); row C shows ✓. Tap *I'm not driving* to clear |
+
+Extra checks (optional):
+
+| # | Do this | Pass if |
+|---|---|---|
+| I7 | Walk with the phone in your **hand** | Banner: *Not recording: put the phone in your trouser pocket* |
+| I8 | As a **passenger**, walk 30 s to a car and ride | When the trip is detected a check runs (*Trip started*) |
+| I9 | Turn on *Check when my car's Bluetooth connects*, allow Nearby devices, connect to a car | A check runs (*Car Bluetooth*) before the car moves |
+| I10 | Study mode: participant ID, *Goggles 1*, walk 1 min, balance check, *Export CSV* | The CSV has `segment`, `walk_check` and `balance_check` rows labelled GOGGLES_LOW |
+| I11 | Turn the switch off | The dashboard card shows *Off* |
+
+---|---|---|
 | I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the *Set up (0 of 3 done)* card appears |
 | I2 | Put the phone in a front trouser pocket and walk normally for 2 min | Step 1 shows *x of 2 min recorded* rising right away; with the phone in the hand the banner says *Not recording* |
 | I3 | Tap **Record balance (voice guided)** three times (feet together, phone flat on chest) | The phone speaks each step and the result; Step 2 shows *1 of 3*, *2 of 3*, then ✓; *Before you drive* appears when steps 1 and 2 are done |
@@ -119,5 +137,5 @@ report after the vehicle starts moving.
 
 ## Automated tests (run on every GitHub push)
 
-- 85 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 88 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

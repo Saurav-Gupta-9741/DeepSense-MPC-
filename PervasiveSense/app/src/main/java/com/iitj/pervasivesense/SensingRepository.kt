@@ -35,6 +35,8 @@ object SensingRepository {
         fun requestFitCheck()
         fun startBalanceTest(purpose: BalancePurpose)
         fun cancelBalanceTest()
+        fun startFitPractice(kind: PracticeWalk)
+        fun cancelFitPractice()
         fun dismissFitAdvice()
         fun resetFitToDrive()
     }
@@ -80,6 +82,8 @@ object SensingRepository {
     fun requestFitCheck() { controller?.requestFitCheck() }
     fun startBalanceTest(purpose: BalancePurpose) { controller?.startBalanceTest(purpose) }
     fun cancelBalanceTest() { controller?.cancelBalanceTest() }
+    fun startFitPractice(kind: PracticeWalk) { controller?.startFitPractice(kind) }
+    fun cancelFitPractice() { controller?.cancelFitPractice() }
     fun dismissFitAdvice() { controller?.dismissFitAdvice() }
     fun resetFitToDrive() { controller?.resetFitToDrive() }
 }

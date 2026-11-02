@@ -180,6 +180,15 @@ class SensingEngine(
     fun dismissFitAdvice() = fitCommand { fitToDrive.dismissAdvice() }
     fun resetFitToDrive() = fitCommand { fitToDrive.resetLearning() }
     fun cancelBalanceTest() = fitCommand { fitToDrive.cancelBalanceTest() }
+    fun cancelFitPractice() = fitCommand { fitToDrive.cancelPractice() }
+
+    /** "Test it" practice walk; false if nothing can be checked yet. */
+    fun startFitPractice(kind: PracticeWalk): Boolean {
+        if (lastSampleT == Long.MIN_VALUE) return false
+        val ok = fitToDrive.startPractice(lastSampleT, kind)
+        publish(lastSampleT)
+        return ok
+    }
 
     /** Null if no sensor data has arrived yet. Refused in a moving vehicle or (references) during a warning. */
     fun startBalanceTest(purpose: BalancePurpose): BalanceStart? {

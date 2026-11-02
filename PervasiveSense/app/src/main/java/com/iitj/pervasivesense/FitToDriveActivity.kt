@@ -4,12 +4,9 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.ColorStateList
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.speech.tts.TextToSpeech
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
@@ -31,7 +28,8 @@ import java.util.Locale
 
 /**
  * Fit-to-drive screen. Set up (walk, normal balance, contact) until done,
- * then "Before you drive" (check my walk, balance check) and any advice.
+ * then "Before you drive" (check my walk, balance check), "Test it" (three
+ * practice tests that are never learned) and any advice.
  * Like the dashboard it only renders [SensingSnapshot.fitToDrive]; the engine
  * decides. The balance test is spoken step by step, because the phone is held
  * against the chest and the screen cannot be read.
@@ -43,11 +41,19 @@ class FitToDriveActivity : AppCompatActivity() {
         const val EXTRA_DISMISS = "com.iitj.pervasivesense.extra.DISMISS_FIT"
     }
 
+    /** "Test it" results, kept while the app runs (the screen is often closed during a test walk). */
+    private object Tests {
+        class Result(val text: String, val asExpected: Boolean)
+        val results = HashMap<Char, Result>()
+        var seenCheck: Long? = null
+        var seenBalance: Long? = null
+        /** The next balance check is test C. */
+        var cPending = false
+    }
+
     private lateinit var binding: ActivityFitToDriveBinding
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-    private var tone: ToneGenerator? = null
-    private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private var voice: FitVoice? = null
     private var bindingUi = false
 
     // Balance test progress, for the spoken cues.
@@ -77,8 +83,7 @@ class FitToDriveActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityFitToDriveBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        tone = try { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80) } catch (e: RuntimeException) { null }
-        tts = TextToSpeech(this) { status -> ttsReady = status == TextToSpeech.SUCCESS && chooseVoiceLanguage() }
+        voice = FitVoice(this)
 
         bindingUi = true
         binding.switchEnabled.isChecked = FitToDriveStore.isEnabled(this)
@@ -104,7 +109,11 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnStep3.setOnClickListener { focusContact() }
         binding.btnCheckNow.setOnClickListener { SensingRepository.requestFitCheck() }
         binding.btnBalanceCheck.setOnClickListener { startBalance(BalancePurpose.CHECK) }
-        binding.btnBalanceCancel.setOnClickListener { SensingRepository.cancelBalanceTest(); tts?.stop() }
+        binding.btnBalanceCancel.setOnClickListener { SensingRepository.cancelBalanceTest(); Tests.cPending = false; voice?.stop() }
+        binding.btnTestA.setOnClickListener { startPractice(PracticeWalk.NORMAL) }
+        binding.btnTestB.setOnClickListener { startPractice(PracticeWalk.WOBBLY) }
+        binding.btnTestC.setOnClickListener { Tests.cPending = true; startBalance(BalancePurpose.CHECK) }
+        binding.btnTestCancel.setOnClickListener { SensingRepository.cancelFitPractice(); voice?.stop() }
         binding.btnSaveContact.setOnClickListener { saveContact() }
         binding.btnCall.setOnClickListener {
             launch(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(FitToDriveStore.contactPhone(this)))))
@@ -166,10 +175,8 @@ class FitToDriveActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        tts?.shutdown()
-        tts = null
-        tone?.release()
-        tone = null
+        voice?.shutdown()
+        voice = null
         super.onDestroy()
     }
 
@@ -233,6 +240,17 @@ class FitToDriveActivity : AppCompatActivity() {
         beep()
     }
 
+    /** The balance check offered after test B counts as test C. */
+    private fun startOfferedBalance() {
+        if (Tests.results.containsKey('B') && !Tests.results.containsKey('C')) Tests.cPending = true
+        startBalance(BalancePurpose.CHECK)
+    }
+
+    private fun startPractice(kind: PracticeWalk) {
+        SensingRepository.startFitPractice(kind)
+        say(getString(if (kind == PracticeWalk.NORMAL) R.string.fit_say_test_a else R.string.fit_say_test_b))
+    }
+
     private fun saveContact() {
         val phone = binding.etContactPhone.text.toString().trim()
         val digits = phone.count { it.isDigit() }
@@ -270,27 +288,17 @@ class FitToDriveActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------ voice and beeps
-    /** The phone's language if the voice supports it, otherwise English; false if neither. */
-    private fun chooseVoiceLanguage(): Boolean {
-        val t = tts ?: return false
-        for (locale in listOf(Locale.getDefault(), Locale.ENGLISH)) {
-            val r = t.setLanguage(locale)
-            if (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED) return true
-        }
-        return false
-    }
-
     /**
      * Speaks [text] (if a voice is available) plus a beep and vibration, which always work.
      * [interrupt] cuts off what is being said; cues during the test queue up instead.
      */
     private fun say(text: String, interrupt: Boolean = true) {
-        if (ttsReady) tts?.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "fit")
-        beep()
+        voice?.say(text, interrupt)
+        binding.root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
     }
 
     private fun beep() {
-        tone?.startTone(ToneGenerator.TONE_PROP_BEEP2, 250)
+        voice?.beep()
         binding.root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
     }
 
@@ -312,6 +320,7 @@ class FitToDriveActivity : AppCompatActivity() {
             cardBalance.visibility = View.GONE
             cardSetup.visibility = View.GONE
             cardCheck.visibility = View.GONE
+            cardTest.visibility = View.GONE
             btnRecordAgain.visibility = View.GONE
             if (f != null) renderBalance(f)
             return@with
@@ -322,9 +331,11 @@ class FitToDriveActivity : AppCompatActivity() {
             // During the balance test only the countdown is shown.
             cardSetup.visibility = View.GONE
             cardCheck.visibility = View.GONE
+            cardTest.visibility = View.GONE
         } else {
             renderSetup(f, canAct)
             renderCheck(f, canAct)
+            renderTest(f, canAct)
         }
 
         btnRecordAgain.visibility = if (f.balanceReferences >= f.balanceReferencesNeeded) View.VISIBLE else View.GONE
@@ -348,6 +359,7 @@ class FitToDriveActivity : AppCompatActivity() {
             f.learningPaused -> getString(R.string.fit_study_paused) to R.color.accent_amber
             f.walkingOutsidePocket -> getString(R.string.fit_walk_not_pocket) to R.color.accent_amber
             f.recordingWalk -> getString(R.string.fit_walk_recording) to R.color.accent_emerald
+            f.practice != null -> getString(R.string.fit_test_walk_now) to R.color.primary_glow
             f.baselineStatus == BaselineStatus.LEARNING -> getString(R.string.fit_walk_waiting) to R.color.primary_glow
             else -> null to 0
         }
@@ -431,7 +443,7 @@ class FitToDriveActivity : AppCompatActivity() {
                 tvAdviceTitle.setTextColor(color(R.color.accent_amber))
                 tvAdviceDetail.setText(R.string.fit_advice_consider_detail)
                 btnAdvicePrimary.setText(R.string.fit_action_balance)
-                btnAdvicePrimary.setOnClickListener { startBalance(BalancePurpose.CHECK) }
+                btnAdvicePrimary.setOnClickListener { startOfferedBalance() }
                 btnAdviceSecondary.setText(R.string.fit_action_not_now)
             }
             FitAdvice.TAKE_BALANCE_CHECK -> {
@@ -439,7 +451,7 @@ class FitToDriveActivity : AppCompatActivity() {
                 tvAdviceTitle.setTextColor(color(R.color.accent_amber))
                 tvAdviceDetail.text = getString(R.string.fit_advice_balance_detail, pct(f.lastCheck?.percentile ?: 0.99f))
                 btnAdvicePrimary.setText(R.string.fit_action_balance)
-                btnAdvicePrimary.setOnClickListener { startBalance(BalancePurpose.CHECK) }
+                btnAdvicePrimary.setOnClickListener { startOfferedBalance() }
             }
             FitAdvice.DONT_DRIVE -> {
                 tvAdviceTitle.setText(R.string.fit_advice_dont_title)
@@ -468,7 +480,11 @@ class FitToDriveActivity : AppCompatActivity() {
             val purpose = f.balancePurpose ?: BalancePurpose.CHECK
             if (!balanceWasRunning) {
                 spokenCues.clear()
-                say(getString(if (purpose == BalancePurpose.REFERENCE) R.string.fit_say_start_reference else R.string.fit_say_start_check))
+                say(getString(when {
+                    purpose == BalancePurpose.REFERENCE -> R.string.fit_say_start_reference
+                    Tests.cPending -> R.string.fit_say_test_c
+                    else -> R.string.fit_say_start_check
+                }))
             }
             val settling = f.balanceProgress * BalanceTest.DURATION_SEC < BalanceTest.SETTLE_SEC
             if (!settling && spokenCues.add("hold")) say(getString(R.string.fit_say_hold), interrupt = false)
@@ -533,13 +549,13 @@ class FitToDriveActivity : AppCompatActivity() {
         tvLastLevel.text = level
         tvLastLevel.setTextColor(color(if (c?.level != null) dot else R.color.text_main))
         levelDot.backgroundTintList = ColorStateList.valueOf(color(dot))
-        tvLastDetail.text = if (f.waitingForWalk) getString(R.string.fit_waiting) else detail
+        tvLastDetail.text = if (f.waitingForWalk && f.practice == null) getString(R.string.fit_waiting) else detail
         tvLastDetail.visibility = if (tvLastDetail.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         tvLastMeta.text = if (c == null) "" else {
             val trigger = getString(when (c.trigger) {
                 CheckTrigger.TRIP_START -> R.string.fit_trigger_trip
                 CheckTrigger.CAR_BLUETOOTH -> R.string.fit_trigger_bt
-                CheckTrigger.MANUAL -> R.string.fit_trigger_manual
+                CheckTrigger.MANUAL -> if (c.practice != null) R.string.fit_trigger_test else R.string.fit_trigger_manual
             })
             val at = timeFormat.format(Date(c.wallMillis))
             // Segments are 8 s long, a new one every 4 s.
@@ -570,5 +586,70 @@ class FitToDriveActivity : AppCompatActivity() {
             else getString(R.string.fit_status_provisional, f.daysForEstablished)
         tvLearned.text = resources.getQuantityString(R.plurals.fit_learned, f.baselineDays, f.baselineWalkMinutes, f.baselineDays) +
             ". " + status
+    }
+
+    /**
+     * "Test it": A normal walk, B wobbly walk (both never learned), C balance check while
+     * swaying. Each row shows what to expect, then the result and whether it was as expected.
+     */
+    private fun renderTest(f: FitToDriveReport, canAct: Boolean) = with(binding) {
+        val ready = f.baselineStatus != BaselineStatus.LEARNING && f.balanceReferences >= f.balanceReferencesNeeded
+        cardTest.visibility = if (ready) View.VISIBLE else View.GONE
+        if (!ready) return@with
+
+        f.lastCheck?.let { c ->
+            val p = c.practice
+            if (p != null && c.wallMillis != Tests.seenCheck) Tests.results[if (p == PracticeWalk.NORMAL) 'A' else 'B'] = practiceResult(p, c)
+            Tests.seenCheck = c.wallMillis
+        }
+        f.lastBalance?.let { b ->
+            if (b.wallMillis != Tests.seenBalance && Tests.cPending && b.purpose == BalancePurpose.CHECK) {
+                Tests.cPending = false
+                Tests.results['C'] = balanceResult(b)
+            }
+            Tests.seenBalance = b.wallMillis
+        }
+
+        val running = f.practice
+        testRunning.visibility = if (running != null) View.VISIBLE else View.GONE
+        tvTestRunning.setText(if (running == PracticeWalk.WOBBLY) R.string.fit_test_running_b else R.string.fit_test_running_a)
+        val free = canAct && running == null && !f.waitingForWalk
+        for ((row, hint) in listOf(
+            Triple('A', tvTestAResult, btnTestA) to R.string.fit_test_a_hint,
+            Triple('B', tvTestBResult, btnTestB) to R.string.fit_test_b_hint,
+            Triple('C', tvTestCResult, btnTestC) to R.string.fit_test_c_hint
+        )) {
+            val (k, tv, btn) = row
+            val r = Tests.results[k]
+            tv.text = r?.text ?: getString(hint)
+            tv.setTextColor(color(when {
+                r == null -> R.color.text_muted
+                r.asExpected -> R.color.accent_emerald
+                else -> R.color.accent_amber
+            }))
+            btn.setText(if (r == null) R.string.fit_test_start else R.string.fit_test_again)
+            btn.isEnabled = free
+        }
+        tvTestDone.visibility = if (listOf('A', 'B', 'C').all { Tests.results[it]?.asExpected == true }) View.VISIBLE else View.GONE
+    }
+
+    private fun practiceResult(p: PracticeWalk, c: WalkCheck): Tests.Result {
+        if (c.level == null) return Tests.Result(getString(R.string.fit_test_no_walk), false)
+        return if (p == PracticeWalk.NORMAL) when (c.level) {
+            WalkLevel.NORMAL -> Tests.Result(getString(R.string.fit_test_a_normal), true)
+            WalkLevel.UNUSUAL -> Tests.Result(getString(R.string.fit_test_a_unusual), false)
+            WalkLevel.LARGE_GAP -> Tests.Result(getString(R.string.fit_test_a_large), false)
+        } else when (c.level) {
+            WalkLevel.LARGE_GAP -> Tests.Result(getString(R.string.fit_test_b_large), true)
+            WalkLevel.UNUSUAL -> Tests.Result(getString(R.string.fit_test_b_unusual), true)
+            WalkLevel.NORMAL -> Tests.Result(getString(R.string.fit_test_b_normal), false)
+        }
+    }
+
+    private fun balanceResult(b: BalanceResult): Tests.Result = when (b.outcome) {
+        BalanceOutcome.FAILED -> Tests.Result(getString(R.string.fit_test_c_failed), true)
+        BalanceOutcome.PASSED -> Tests.Result(getString(R.string.fit_test_c_passed), false)
+        BalanceOutcome.MOVED -> Tests.Result(getString(R.string.fit_test_c_moved), false)
+        else -> Tests.Result(getString(R.string.fit_say_no_reference), false)
     }
 }

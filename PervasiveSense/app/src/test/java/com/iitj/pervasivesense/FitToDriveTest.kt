@@ -471,6 +471,77 @@ class FitToDriveMonitorTest {
         assertFalse(m.report().walkingOutsidePocket)
     }
 
+    @Test
+    fun anUncheckedUnsteadyWalkIsNeverLearnedButAnUncheckedNormalWalkIs() {
+        // Established (here after 15 segments on 1 day): an unchecked large-gap walk is dropped.
+        // While provisional, "normal" may be a single day, so only extreme staggering is dropped
+        // (judging harder discards real day-to-day variation: see FitToDriveEvaluationTest).
+        val m = monitor(config.copy(segmentsForEstablished = 15, daysForEstablished = 1))
+        var t = learnNormal(m)
+        assertEquals(BaselineStatus.ESTABLISHED, m.report().baselineStatus)
+        val learned = m.report().baselineSegments
+        // Walking home unsteady (no trip, no check): after its quarantine it is judged, not learned.
+        for (rec in listOf(session3.impaired(1.0), session3.impaired(1.0, seed = 5))) {
+            t = feed(m, rec, t)
+            t = feed(m, Recording.constant(1.0, 0f, 0f, 9.81f), t + sixMinutes, walking = false)
+            assertEquals(learned, m.report().baselineSegments)
+        }
+        assertTrue(checks().isEmpty())
+        // An ordinary unchecked walk still becomes part of "normal".
+        t = feed(m, session3, t)
+        feed(m, Recording.constant(1.0, 0f, 0f, 9.81f), t + sixMinutes, walking = false)
+        assertTrue(m.report().baselineSegments > learned)
+    }
+
+    @Test
+    fun practiceWalksAreScoredSpokenAndNeverLearned() {
+        val m = monitor()
+        assertFalse(m.startPractice(start, PracticeWalk.NORMAL)) // nothing to compare with yet
+        var t = learnNormal(m)
+        val learned = m.report().baselineSegments
+
+        assertTrue(m.startPractice(t, PracticeWalk.NORMAL))
+        assertEquals(PracticeWalk.NORMAL, m.report().practice)
+        t = feed(m, session1, t + 1_000_000_000L)
+        val a = checks().last()
+        assertEquals(PracticeWalk.NORMAL, a.practice)
+        assertEquals(CheckTrigger.MANUAL, a.trigger)
+        assertEquals(WalkLevel.NORMAL, a.level)
+        assertTrue(a.segments >= 5)
+        assertNull(m.report().practice)
+
+        assertTrue(m.startPractice(t, PracticeWalk.WOBBLY))
+        t = feed(m, session1.impaired(1.0, seed = 3), t + 1_000_000_000L)
+        val b = checks().last()
+        assertEquals(PracticeWalk.WOBBLY, b.practice)
+        assertEquals(WalkLevel.LARGE_GAP, b.level)
+        // The real response follows, so test C (balance check) can be tried.
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
+        m.dismissAdvice()
+
+        // Neither test walk ever becomes part of "normal".
+        feed(m, Recording.constant(1.0, 0f, 0f, 9.81f), t + sixMinutes, walking = false)
+        assertEquals(learned, m.report().baselineSegments)
+    }
+
+    @Test
+    fun aPracticeWalkWaitsThenGivesUpOrCanBeCancelled() {
+        val m = monitor()
+        val t = learnNormal(m)
+        assertTrue(m.startPractice(t, PracticeWalk.NORMAL))
+        assertTrue(m.report().waitingForWalk)
+        m.cancelPractice()
+        assertNull(m.report().practice)
+        assertFalse(m.report().waitingForWalk)
+
+        assertTrue(m.startPractice(t, PracticeWalk.WOBBLY))
+        feed(m, Recording.constant(200.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        val c = checks().last()
+        assertEquals(NotScoredReason.NO_RECENT_WALK, c.notScored)
+        assertEquals(PracticeWalk.WOBBLY, c.practice)
+        assertNull(m.report().practice)
+    }
+
     // ---------------------------------------------------------------- set up
 
     @Test

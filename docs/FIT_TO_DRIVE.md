@@ -30,10 +30,26 @@ processing and all learned data stay on the phone.
 
 | Step (slide 8) | Implementation |
 |---|---|
-| **1. Learn normal** | While enabled, every stretch of walking that DeepSense labels WALKING is cut into 8 s segments (a new one every 4 s) and described by six gait features. During set-up (nothing can be checked yet) segments are learned at once. After that they enter the baseline only after leaving a 5-minute quarantine unflagged, so the walk being scored is never part of the "normal" it is compared with, and a flagged walk is never learned. At most 10 min of walking per day is learned, so one long walk cannot dominate. The check starts after about 2 min of walking (*provisional*) and is *established* after 10 min over 7 days. |
+| **1. Learn normal** | While enabled, every stretch of walking that DeepSense labels WALKING is cut into 8 s segments (a new one every 4 s) and described by six gait features. During set-up (nothing can be checked yet) segments are learned at once. After that they enter the baseline only after leaving a 5-minute quarantine, and, once the baseline is established, only if the walk around them (about 1 min) is not a *large gap*. In the first week "normal" is often a single day and another sober day can look far from it, so only extreme staggering (score ≥ 5) is dropped then; judging harder discarded real day-to-day variation (sober false alarms 1/24 → 3/24 on MotionSense). So the walk being scored is never part of the "normal" it is compared with, a flagged walk is never learned, and an unsteady walk that nobody checked (say, walking home after drinking) never widens "normal" either. Test walks ("Test it") are never learned. At most 10 min of walking per day is learned, so one long walk cannot dominate. The check starts after about 2 min of walking (*provisional*) and is *established* after 10 min over 7 days. |
 | **2. Watch the walk** | The segments of the last 5 minutes are kept. The walk is scored when Google Activity Recognition reports a trip has started (IN_VEHICLE), when a car audio or hands-free Bluetooth unit connects (optional; usually before the car moves), or when the user taps **Check my walk**. Each walk is scored once. |
 | **3. Measure the gap** | Per-segment distance from the baseline, walk score = median over the walk, thresholds from the user's own walks (below). |
 | **4. Respond** | A large gap raises a notification and asks for the 30 s balance check. A failed check, or one that could not show normal balance, advises against driving and offers a cab search and the trusted contact. |
+
+### Test it (practice)
+
+Once set up, the screen has a **Test it** card with three practice tests, so the
+whole flow can be seen in a few minutes without being impaired. Test walks are
+scored like a real check but **never learned**, and the result is **spoken**
+(the phone is in the pocket, screen locked).
+
+| Test | Do | Expected |
+|---|---|---|
+| A. Normal walk | Tap *Start*, lock the screen, phone in trouser pocket, walk normally ~30 s | Spoken and shown: *Normal for you* |
+| B. Wobbly walk | Same, but sway side to side with uneven steps (someone next to you) | *Very different*, then the *Take the balance check* card |
+| C. Balance check while swaying | Feet together, phone on the chest, sway gently from the hips for 30 s | *Better not to drive*, with *Find a cab* / *Call* / *Message* |
+
+Each row shows ✓ when the result was as expected, or a tip to retry.
+*I'm not driving* clears the warning afterwards.
 
 ### The drunk-driving case
 
@@ -46,6 +62,7 @@ processing and all learned data stay on the phone.
 | Phone in the **hand** on the walk | Not learned and not scored: the baseline is pocket walking. The proximity sensor tells pocket from hand, and the screen asks to keep the phone in the pocket |
 | Tries to record a "normal balance" while possibly impaired | Refused during any warning or offer. A recording far less steady than earlier ones (≥ 1.75×) is rejected |
 | Mildly drunk evenings over weeks | Only walks scored *normal* are learned, so impaired walks never drift into "normal" |
+| Walks home unsteady and **never checks** (no trip) | When the walk leaves the 5-min window it is scored. Once established (7 days) a large gap is never learned; in the first week only extreme staggering is dropped. Test walks are never learned |
 
 ### Gait features
 
@@ -142,13 +159,13 @@ sessions (wlk_7, wlk_8, about 2.5–4 min). It then scored, as a trip started:
 
 Run it locally with `MOTIONSENSE_DIR=<motion-sense/data>`; CI downloads the dataset and runs it on every push.
 
-### Unit tests (35 more, always run)
+### Unit tests (38 more, always run)
 
 | Class | Tests | What it proves |
 |---|---|---|
 | `GaitSegmentExtractorTest` | 5 | Cadence within 8 % of an independent gyroscope-spectrum reference; healthy stride CV < 5 %; features identical under 3 phone rotations (this caught a sign-ambiguity bug); no segments while sitting, standing, not walking or interrupted; works without a gyroscope; impairment moves every feature the expected way |
 | `GaitBaselineTest` | 4 | Thresholds are percentiles of the user's own walks; one-sided scoring; median walk score; daily quota and rolling capacity |
-| `FitToDriveMonitorTest` | 24 | Held-out session normal, impaired walk large gap with an explanation; quarantine and never learning a flagged walk; not scored while learning; trip without a recent walk; each walk scored once; car-Bluetooth trigger; manual check waits for a walk or gives up; disabled = nothing learned; state survives a restart; balance sway is orientation-free and detects walking off; pass/fail against the personal reference; after a large gap only a normal balance clears it; advice expiry; progress. **Drunk-driving cases:** slightly unusual walk → balance offer and never learned; found only while driving → no prompt; driving after a warning → reminder; no balance test in a moving vehicle; implausible normal balance rejected; study session learns nothing; walks in the hand ignored. **Set-up:** walking counts at once while learning; live recording status; 3 balance recordings kept |
+| `FitToDriveMonitorTest` | 27 | Held-out session normal, impaired walk large gap with an explanation; quarantine and never learning a flagged walk; not scored while learning; trip without a recent walk; each walk scored once; car-Bluetooth trigger; manual check waits for a walk or gives up; disabled = nothing learned; state survives a restart; balance sway is orientation-free and detects walking off; pass/fail against the personal reference; after a large gap only a normal balance clears it; advice expiry; progress. **Drunk-driving cases:** slightly unusual walk → balance offer and never learned; found only while driving → no prompt; driving after a warning → reminder; no balance test in a moving vehicle; implausible normal balance rejected; study session learns nothing; walks in the hand ignored. **Set-up:** walking counts at once while learning; live recording status; 3 balance recordings kept. **Learning safety:** once established, an unchecked very unsteady walk is never learned, an unchecked normal walk is. **Test it:** practice walks are scored (normal → *normal*, wobbly → *large gap* and the balance check) and never learned; a practice walk gives up or can be cancelled |
 | `FitToDriveEngineTest` | 2 | End to end through the real-time pipeline (jittered device events → resampler → DeepSense gate → gait → trip start → large gap → advice in the snapshot; balance test refused in the car); the proximity sensor decides pocket walks |
 
 ### Dose-response

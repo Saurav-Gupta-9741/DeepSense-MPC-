@@ -75,6 +75,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     private lateinit var notificationManager: NotificationManager
     private lateinit var sensorManager: SensorManager
     private var wakeLock: PowerManager.WakeLock? = null
+    /** Created on the first spoken walk result. */
+    private var voice: FitVoice? = null
 
     // Owned by the sensing thread.
     private var engine: SensingEngine? = null
@@ -168,6 +170,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         if (started) handler.post { stopSensing() }
         thread.quitSafely() // runs the pending teardown first
         notificationManager.cancel(BREAK_NOTIFICATION_ID)
+        voice?.shutdown(); voice = null
         SensingRepository.setStatus(ServiceStatus.STOPPED)
         super.onDestroy()
     }
@@ -343,6 +346,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             is FitToDriveEvent.WalkChecked -> {
                 studyLogCheck(event.check)
                 val c = event.check
+                // Asked for on the screen (Check my walk / Test it): the phone is in a pocket, say the result.
+                if (c.trigger == CheckTrigger.MANUAL) sayWalkResult(c)
                 when {
                     // The trip was detected while moving: never ask a driver to use the phone.
                     c.level == WalkLevel.LARGE_GAP && c.trigger == CheckTrigger.TRIP_START ->
@@ -366,6 +371,17 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 }
             }
         }
+    }
+
+    private fun sayWalkResult(c: WalkCheck) {
+        val text = when (c.level) {
+            WalkLevel.NORMAL -> R.string.fit_say_walk_normal
+            WalkLevel.UNUSUAL -> R.string.fit_say_walk_unusual
+            WalkLevel.LARGE_GAP -> R.string.fit_say_walk_large
+            null -> if (c.notScored == NotScoredReason.NO_RECENT_WALK) R.string.fit_say_walk_none else return
+        }
+        val v = voice ?: FitVoice(this).also { voice = it }
+        v.say(getString(text))
     }
 
     private fun notifyFit(title: String, text: String, balanceAction: Boolean, urgent: Boolean = true) {
@@ -489,6 +505,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     }
 
     override fun cancelBalanceTest() { handler.post { engine?.cancelBalanceTest() } }
+    override fun startFitPractice(kind: PracticeWalk) { handler.post { engine?.startFitPractice(kind) } }
+    override fun cancelFitPractice() { handler.post { engine?.cancelFitPractice() } }
 
     override fun dismissFitAdvice() {
         handler.post { engine?.dismissFitAdvice() }
