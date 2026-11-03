@@ -359,6 +359,12 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) {
         when (event) {
             is FitToDriveEvent.StateChanged -> fitDirty = true
+            // Saved at once, so a warning survives the app being killed right after it.
+            is FitToDriveEvent.WalkChecked, is FitToDriveEvent.BalanceDone -> saveFitNow()
+            else -> Unit
+        }
+        when (event) {
+            is FitToDriveEvent.StateChanged -> Unit
             is FitToDriveEvent.SegmentMeasured -> studyLogSegment(event)
             is FitToDriveEvent.WalkChecked -> {
                 studyLogCheck(event.check)
@@ -382,8 +388,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 notifyFit(getString(R.string.fit_notify_reminder_title),
                     getString(if (event.dismissed) R.string.fit_notify_reminder_dismissed_text else R.string.fit_notify_reminder_text),
                     balanceAction = false)
-                // Connecting to one's own car is strong evidence of driving (a trip start may be a cab).
-                if (event.trigger == CheckTrigger.CAR_BLUETOOTH) alert().start(AlertKind.DRIVING_AFTER_WARNING)
+                // The car's Bluetooth plus a trip: driving (Bluetooth alone may be earbuds, a trip alone a cab).
+                if (event.driving) alert().start(AlertKind.DRIVING_AFTER_WARNING)
             }
             is FitToDriveEvent.WalkSession -> speak(getString(when (event.stage) {
                 WalkSessionStage.RECORDING -> R.string.fit_say_walk_recording
@@ -398,12 +404,13 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             }
             is FitToDriveEvent.BalanceDone -> {
                 studyLogBalance(event.result)
-                if (event.result.outcome == BalanceOutcome.REFERENCE_SAVED) {
-                    engine?.let { FitToDriveStore.save(this, it.fitToDrive.exportState()) }
-                    fitDirty = false
-                }
             }
         }
+    }
+
+    private fun saveFitNow() {
+        engine?.let { FitToDriveStore.save(this, it.fitToDrive.exportState()) }
+        fitDirty = false
     }
 
     private fun sayWalkResult(c: WalkCheck) {

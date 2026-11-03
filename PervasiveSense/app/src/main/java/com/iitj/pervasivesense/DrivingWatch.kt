@@ -54,8 +54,11 @@ class DrivingWatch(val config: Config = Config()) {
     private val aFast = alpha(0.25f)
     private val aMean = alpha(0.5f)
     private val aG0 = alpha(60f)
+    private val aUp = alpha(20f)
 
     private val g = FloatArray(3)
+    /** Slow "up" direction (20 s): splits the acceleration into vertical (bumps) and horizontal (braking). */
+    private val up = FloatArray(3)
     private var started = false
     private var yawSlow = 0f
     private var yawFast = 0f
@@ -84,7 +87,7 @@ class DrivingWatch(val config: Config = Config()) {
 
     fun reset() {
         started = false; samples = 0
-        yawSlow = 0f; yawFast = 0f; mean.fill(0f); g0 = 0f
+        yawSlow = 0f; yawFast = 0f; mean.fill(0f); up.fill(0f); g0 = 0f
         jerkN = 0; jerkI = 0
         lobeSign = 0; lobes.clear()
     }
@@ -97,6 +100,7 @@ class DrivingWatch(val config: Config = Config()) {
         if (!started) {
             g[0] = s[0]; g[1] = s[1]; g[2] = s[2]
             mean[0] = s[0]; mean[1] = s[1]; mean[2] = s[2]
+            up[0] = s[0]; up[1] = s[1]; up[2] = s[2]
             started = true
         }
         for (i in 0 until 3) g[i] += aGravity * (s[i] - g[i])
@@ -108,12 +112,17 @@ class DrivingWatch(val config: Config = Config()) {
         val settled = samples > 150
 
         // Horizontal acceleration: length of the 0.5 s mean vector against gravity's length.
-        for (i in 0 until 3) mean[i] += aMean * (s[i] - mean[i])
+        for (i in 0 until 3) { mean[i] += aMean * (s[i] - mean[i]); up[i] += aUp * (s[i] - up[i]) }
         val m2 = mean[0] * mean[0] + mean[1] * mean[1] + mean[2] * mean[2]
         val m = sqrt(m2)
         g0 = if (g0 == 0f) m else g0 + aG0 * (m - g0) // learns the sensor's own 1 g
         var event: DrivingEvent? = null
-        val h = sqrt(maxOf(0f, m2 - g0 * g0))
+        // Both must be large: the length (orientation-free: the phone tipping in a pocket changes
+        // only the direction) and the part across the slow "up" direction (a speed breaker or
+        // pothole is vertical, so it changes the length but not this).
+        val upN = sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).coerceAtLeast(1e-3f)
+        val vertical = (mean[0] * up[0] + mean[1] * up[1] + mean[2] * up[2]) / upN
+        val h = minOf(sqrt(maxOf(0f, m2 - g0 * g0)), sqrt(maxOf(0f, m2 - vertical * vertical)))
         if (settled && h >= config.harshMs2 && cooledDown(t, lastHarshT)) {
             lastHarshT = t
             event = DrivingEvent(t, DrivingEventType.HARSH_BRAKING, h)
@@ -168,5 +177,26 @@ class DrivingWatch(val config: Config = Config()) {
     private fun prune(t: Long) {
         val window = (config.eventsWindowSec * 1e9f).toLong()
         while (events.isNotEmpty() && t - events.first().tNanos > window) events.removeFirst()
+    }
+}
+
+/**
+ * One trip from the first vehicle detection until [endSec] without one. Vehicle
+ * detection drops out at red lights and in traffic jams; without this, each restart
+ * would be a "new trip", forgetting "I'm a passenger" and the driving seen so far.
+ */
+class TripTracker(private val endSec: Float = 180f) {
+    private var active = false
+    private var lastInVehicleT = Long.MIN_VALUE
+
+    /** Returns true when a new trip starts. */
+    fun update(t: Long, inVehicle: Boolean): Boolean {
+        if (inVehicle) {
+            lastInVehicleT = t
+            if (!active) { active = true; return true }
+        } else if (active && t - lastInVehicleT > (endSec * 1e9f).toLong()) {
+            active = false
+        }
+        return false
     }
 }

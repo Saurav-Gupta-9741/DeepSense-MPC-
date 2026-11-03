@@ -13,7 +13,8 @@ enum class NotScoredReason { NO_RECENT_WALK, STILL_LEARNING }
  */
 enum class FitAdvice { NONE, CONSIDER_BALANCE_CHECK, TAKE_BALANCE_CHECK, DONT_DRIVE, BALANCE_OK }
 enum class BalancePurpose { CHECK, REFERENCE }
-enum class BalanceOutcome { PASSED, FAILED, MOVED, NO_REFERENCE, REFERENCE_SAVED, REFERENCE_REJECTED }
+/** TOO_STILL: far steadier than the user's own recordings (phone put down, or sitting): not a valid test. */
+enum class BalanceOutcome { PASSED, FAILED, MOVED, TOO_STILL, NO_REFERENCE, REFERENCE_SAVED, REFERENCE_REJECTED }
 enum class BalanceStart { STARTED, REFUSED_WARNING, REFUSED_IN_VEHICLE }
 /** Guided set-up walk ("Start walk recording"): spoken feedback while the phone is in the pocket. */
 enum class WalkSessionStage { RECORDING, HALFWAY, DONE, NOTHING_YET, TIMED_OUT }
@@ -100,7 +101,9 @@ sealed interface FitToDriveEvent {
      * A trip is starting although the last hour brought a warning. [dismissed]: the user
      * had tapped "I'm not driving" (or the advice expired), so this may mean driving anyway.
      */
-    class DrivingAfterWarning(val trigger: CheckTrigger, val advice: FitAdvice, val dismissed: Boolean = false) : FitToDriveEvent
+    class DrivingAfterWarning(val trigger: CheckTrigger, val advice: FitAdvice, val dismissed: Boolean = false,
+                              /** The car's Bluetooth connected and a trip started too: strong evidence of driving (contact alert). */
+                              val driving: Boolean = false) : FitToDriveEvent
     /** Progress of the guided set-up walk, to be spoken (the phone is in the pocket). */
     class WalkSession(val stage: WalkSessionStage) : FitToDriveEvent
     /** In a vehicle after a warning, the driving looks erratic (weaving, jerky steering, harsh braking). */
@@ -112,7 +115,15 @@ sealed interface FitToDriveEvent {
 }
 
 /** Everything the check learns, for persistence across restarts. */
-class FitToDriveState(val baseline: List<BaselineEntry>, val balanceReferences: List<BalanceReference>)
+class FitToDriveState(
+    val baseline: List<BaselineEntry>,
+    val balanceReferences: List<BalanceReference>,
+    /** Wall time of the last real warning (the 1-hour watch survives a restart); null if none. */
+    val warnedWallMillis: Long? = null,
+    /** A real warning still showing (TAKE_BALANCE_CHECK / DONT_DRIVE) and when it was given. */
+    val advice: FitAdvice = FitAdvice.NONE,
+    val adviceWallMillis: Long? = null
+)
 
 /**
  * Fit-to-drive check (opt-in).
@@ -169,7 +180,11 @@ class FitToDriveMonitor(
         /** The guided set-up walk gives up after this long. */
         val walkSessionSec: Float = 420f,
         /** ...and says "nothing recorded yet" if no walking was recorded this long after the start. */
-        val walkSessionNudgeSec: Float = 60f
+        val walkSessionNudgeSec: Float = 60f,
+        /** Car Bluetooth counts as driving only if a trip starts within this time (earbuds never do). */
+        val carBluetoothTripSec: Float = 600f,
+        /** A balance check this much steadier than the user's own recordings is not valid. */
+        val balanceTooStillRatio: Float = 0.35f
     )
 
     private val extractor = GaitSegmentExtractor()
@@ -207,6 +222,12 @@ class FitToDriveMonitor(
     private var passengerConfirmed = false
     private var inVehicleNow = false
     private var walkSessionStart = Long.MIN_VALUE
+    /** The current advice came from a "Test it" practice test: it never reminds or alerts anyone. */
+    private var practiceAdvice = false
+    /** Last car-Bluetooth connection; driving only once a trip also starts. */
+    private var carBluetoothT = Long.MIN_VALUE
+    /** Restored warning (wall times), applied on the first sample once sensor time is known. */
+    private var restoredWarning: FitToDriveState? = null
     private val walkSessionStages = HashSet<WalkSessionStage>()
 
     /** The guided set-up walk is running (the engine then also accepts steps as walking). */
@@ -254,6 +275,7 @@ class FitToDriveMonitor(
     fun processSample(t: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean, inPocket: Boolean = true,
                       inVehicle: Boolean = false) {
         lastT = t
+        restoredWarning?.let { applyRestoredWarning(t, it) }
         balanceTest.processSample(t, s, hasGyro)?.let { finishBalance(t, it) }
         if (advice != FitAdvice.NONE && adviceT != Long.MIN_VALUE && t - adviceT > secs(config.adviceExpirySec)) {
             advice = FitAdvice.NONE
@@ -292,14 +314,32 @@ class FitToDriveMonitor(
     fun onTripStart(t: Long) {
         passengerConfirmed = false
         drivingWatch.clear()
-        if (enabled) beforeDrive(t, CheckTrigger.TRIP_START)
+        if (!enabled) return
+        beforeDrive(t, CheckTrigger.TRIP_START)
+        carDrivingAfterWarning(t)
     }
 
     /** "I'm a passenger" (e.g. cancelling a contact alert): stop watching the driving on this trip. */
     fun confirmPassenger() { passengerConfirmed = true }
 
     /** A car audio / hands-free Bluetooth device connected: usually before the car moves. */
-    fun onCarBluetooth(t: Long) { if (enabled) beforeDrive(t, CheckTrigger.CAR_BLUETOOTH) }
+    fun onCarBluetooth(t: Long) {
+        if (!enabled) return
+        carBluetoothT = t
+        beforeDrive(t, CheckTrigger.CAR_BLUETOOTH)
+        if (inVehicleNow) carDrivingAfterWarning(t) // the trip had already been detected
+    }
+
+    /**
+     * Car Bluetooth plus a trip within [Config.carBluetoothTripSec], after a real warning: driving.
+     * Bluetooth alone is not enough (some earbuds report themselves as hands-free kits).
+     */
+    private fun carDrivingAfterWarning(t: Long) {
+        if (carBluetoothT == Long.MIN_VALUE || t - carBluetoothT > secs(config.carBluetoothTripSec)) return
+        if (!warningActive && !recentlyWarned(t)) return
+        carBluetoothT = Long.MIN_VALUE
+        onEvent(FitToDriveEvent.DrivingAfterWarning(CheckTrigger.CAR_BLUETOOTH, advice, dismissed = !warningActive, driving = true))
+    }
 
     /** "Check my walk": scores recent walking, or waits for the user to walk. */
     fun requestCheck(t: Long) {
@@ -386,19 +426,42 @@ class FitToDriveMonitor(
     fun cancelBalanceTest() { balanceTest.cancel(); balancePurpose = null }
 
     /** "I'm not driving" or the user read the advice. */
-    fun dismissAdvice() { advice = FitAdvice.NONE }
+    fun dismissAdvice() { advice = FitAdvice.NONE; practiceAdvice = false; onEvent(FitToDriveEvent.StateChanged) }
 
     fun resetLearning() {
         baseline.clear(); references.clear(); recent.clear(); cancelPractice(); stopWalkRecording()
         lastCheck = null; lastBalance = null; advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE
+        practiceAdvice = false; restoredWarning = null
         onEvent(FitToDriveEvent.StateChanged)
     }
 
-    fun exportState() = FitToDriveState(baseline.snapshot(), references.toList())
+    fun exportState(): FitToDriveState {
+        restoredWarning?.let { return FitToDriveState(baseline.snapshot(), references.toList(), it.warnedWallMillis, it.advice, it.adviceWallMillis) }
+        val realAdvice = if (warningActive && !practiceAdvice && adviceT != Long.MIN_VALUE) advice else FitAdvice.NONE
+        return FitToDriveState(baseline.snapshot(), references.toList(),
+            warnedWallMillis = if (warnedT != Long.MIN_VALUE) wallClockOf(warnedT) else null,
+            advice = realAdvice,
+            adviceWallMillis = if (realAdvice != FitAdvice.NONE) wallClockOf(adviceT) else null)
+    }
 
     fun restore(state: FitToDriveState) {
         baseline.restore(state.baseline)
         references.clear(); references.addAll(state.balanceReferences.takeLast(config.balanceReferences))
+        restoredWarning = if (state.warnedWallMillis != null || state.advice != FitAdvice.NONE) state else null
+    }
+
+    /** A restart (app killed, phone rebooted) keeps a warning given before it, for the rest of its hour. */
+    private fun applyRestoredWarning(t: Long, s: FitToDriveState) {
+        restoredWarning = null
+        val now = wallClockOf(t)
+        fun sensorTimeOf(wall: Long) = t - (now - wall) * 1_000_000L
+        s.warnedWallMillis?.let { w ->
+            if (now - w in 0..(config.watchAfterWarningSec * 1000).toLong()) warnedT = sensorTimeOf(w)
+        }
+        val aw = s.adviceWallMillis
+        if (s.advice != FitAdvice.NONE && aw != null && now - aw in 0..(config.adviceExpirySec * 1000).toLong()) {
+            advice = s.advice; adviceT = sensorTimeOf(aw); practiceAdvice = false
+        }
     }
 
     fun report(t: Long = lastT) = FitToDriveReport(
@@ -439,6 +502,8 @@ class FitToDriveMonitor(
      * driving": the person may drive anyway), otherwise score the walk.
      */
     private fun beforeDrive(t: Long, trigger: CheckTrigger) {
+        // Advice from a practice test is not a warning: a real trip clears it and checks the walk as usual.
+        if (practiceAdvice) { advice = FitAdvice.NONE; practiceAdvice = false }
         if (warningActive || recentlyWarned(t)) {
             recent.clear() // possibly impaired walking: never learned
             // Vehicle detection flickers and Bluetooth reconnects: one reminder per trip.
@@ -454,7 +519,7 @@ class FitToDriveMonitor(
     /** In a vehicle: track the driving; after a warning, report erratic driving (at most every 10 min). */
     private fun watchDriving(t: Long, s: FloatArray, hasGyro: Boolean, inVehicle: Boolean) {
         if (!inVehicle) {
-            if (inVehicleNow) drivingWatch.clear()
+            if (inVehicleNow) drivingWatch.reset() // a stop within the trip: keep the events seen so far
             inVehicleNow = false
             return
         }
@@ -565,11 +630,13 @@ class FitToDriveMonitor(
                 if (trigger != CheckTrigger.TRIP_START && (advice == FitAdvice.NONE || advice == FitAdvice.BALANCE_OK)) {
                     advice = FitAdvice.CONSIDER_BALANCE_CHECK
                     adviceT = t
+                    practiceAdvice = p != null
                 }
             WalkLevel.LARGE_GAP -> {
                 advice = FitAdvice.TAKE_BALANCE_CHECK
                 adviceT = t
-                if (p == null) warnedT = t // a practice walk never arms the driving watch
+                practiceAdvice = p != null
+                if (p == null) { warnedT = t; onEvent(FitToDriveEvent.StateChanged) } // a practice walk never arms the driving watch
             }
         }
         publishCheck(WalkCheck(wallClockOf(t), trigger, level, null, score, th.unusual, th.large,
@@ -596,8 +663,9 @@ class FitToDriveMonitor(
             m.moved -> BalanceOutcome.MOVED
             purpose == BalancePurpose.REFERENCE -> {
                 ratio = if (references.isEmpty()) Float.NaN else swayRatio(m)
-                // A "normal" far less steady than the earlier ones is probably not normal.
-                if (!ratio.isNaN() && ratio >= config.balanceFailRatio) {
+                // A "normal" far less steady than the earlier ones is probably not normal;
+                // one far steadier was probably not held (phone put down).
+                if (!ratio.isNaN() && (ratio >= config.balanceFailRatio || ratio < config.balanceTooStillRatio)) {
                     BalanceOutcome.REFERENCE_REJECTED
                 } else {
                     references += BalanceReference(wall, m.swayAccel, m.swayGyro)
@@ -609,7 +677,12 @@ class FitToDriveMonitor(
             references.isEmpty() -> BalanceOutcome.NO_REFERENCE
             else -> {
                 ratio = swayRatio(m)
-                if (ratio >= config.balanceFailRatio) BalanceOutcome.FAILED else BalanceOutcome.PASSED
+                when {
+                    ratio >= config.balanceFailRatio -> BalanceOutcome.FAILED
+                    // Phone put down on a table, or sitting: no real standing balance measured.
+                    ratio < config.balanceTooStillRatio -> BalanceOutcome.TOO_STILL
+                    else -> BalanceOutcome.PASSED
+                }
             }
         }
         if (purpose == BalancePurpose.CHECK) {
@@ -621,10 +694,13 @@ class FitToDriveMonitor(
                 else -> if (flagged) FitAdvice.DONT_DRIVE else advice
             }
             adviceT = t
+            // Still practice: the test C itself, or a check after a practice warning that did not fail.
+            practiceAdvice = practiceBalance || (practiceAdvice && outcome != BalanceOutcome.FAILED)
             when {
                 advice == FitAdvice.BALANCE_OK -> warnedT = Long.MIN_VALUE // normal balance: all clear
-                advice == FitAdvice.DONT_DRIVE && !practiceBalance -> warnedT = t
+                advice == FitAdvice.DONT_DRIVE && !practiceAdvice -> warnedT = t
             }
+            onEvent(FitToDriveEvent.StateChanged)
         }
         val result = BalanceResult(wall, purpose, outcome, m.swayAccel, m.swayGyro, ratio)
         lastBalance = result

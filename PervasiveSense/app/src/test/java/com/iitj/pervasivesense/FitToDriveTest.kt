@@ -634,6 +634,120 @@ class FitToDriveMonitorTest {
         assertTrue(reminders().isEmpty())
     }
 
+    @Test
+    fun aPracticeWarningNeverRemindsOrAlertsAndARealTripChecksAsUsual() {
+        val m = monitor()
+        var t = learnNormal(m)
+        balance(m, BalancePurpose.REFERENCE, stance(31.0, 0.08), t)
+        t += 40_000_000_000L
+        // Test B (wobbly walk): a large gap, as expected...
+        assertTrue(m.startPractice(t, PracticeWalk.WOBBLY))
+        t = feed(m, session1.impaired(1.0, seed = 3), t + 1_000_000_000L)
+        assertEquals(WalkLevel.LARGE_GAP, checks().last().level)
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
+        // ...then test C (sway on purpose): "don't drive", as expected.
+        assertEquals(BalanceStart.STARTED, m.startBalanceTest(t, BalancePurpose.CHECK, practice = true))
+        feed(m, stance(31.0, 0.22, seed = 6), t, walking = false)
+        assertEquals(BalanceOutcome.FAILED, events.filterIsInstance<FitToDriveEvent.BalanceDone>().last().result.outcome)
+        assertEquals(FitAdvice.DONT_DRIVE, m.report().advice)
+        assertEquals(FitAdvice.NONE, m.exportState().advice) // never saved as a real warning
+        // Not dismissed; the car's Bluetooth connects and the trip starts: no reminder, no alert.
+        t += 40_000_000_000L
+        m.onCarBluetooth(t)
+        m.onTripStart(t + oneMinute)
+        assertTrue(reminders().isEmpty())
+        assertFalse(m.report().recentlyWarned)
+        assertEquals(FitAdvice.NONE, m.report().advice)
+    }
+
+    @Test
+    fun aWarningSurvivesARestartForTheRestOfItsHour() {
+        val m = monitor()
+        val t = warnedThenDismissed(m)
+        val saved = m.exportState()
+        assertNotNull(saved.warnedWallMillis)
+        // The app is killed and restarted 10 min later: still watched.
+        val m2 = monitor()
+        m2.restore(saved)
+        feed(m2, Recording.constant(1.0, 0f, 0f, 9.81f), t + 10 * oneMinute, walking = false)
+        assertTrue(m2.report().recentlyWarned)
+        m2.onTripStart(t + 11 * oneMinute)
+        assertEquals(1, reminders().size)
+        // Restarted after the hour: nothing left.
+        val m3 = monitor()
+        m3.restore(saved)
+        feed(m3, Recording.constant(1.0, 0f, 0f, 9.81f), t + 70 * oneMinute, walking = false)
+        assertFalse(m3.report().recentlyWarned)
+    }
+
+    @Test
+    fun anActiveWarningIsSavedAndShownAgainAfterARestart() {
+        val m = monitor()
+        var t = learnNormal(m)
+        m.requestCheck(t)
+        t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        val saved = m.exportState()
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, saved.advice)
+        val m2 = monitor()
+        m2.restore(saved)
+        feed(m2, Recording.constant(1.0, 0f, 0f, 9.81f), t + oneMinute, walking = false)
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m2.report().advice)
+    }
+
+    @Test
+    fun carBluetoothAloneNeverAlertsATripMustStartToo() {
+        val m = monitor()
+        var t = warnedThenDismissed(m)
+        // Earbuds that call themselves "hands-free", while walking: a reminder at most, never the alert.
+        m.onCarBluetooth(t + oneMinute)
+        assertTrue(reminders().none { it.driving })
+        // The car's Bluetooth, then the trip starts: driving.
+        m.onTripStart(t + 5 * oneMinute)
+        assertEquals(1, reminders().count { it.driving })
+        // Bluetooth, then a bus more than 10 min later: not the car.
+        m.onCarBluetooth(t + 20 * oneMinute)
+        m.onTripStart(t + 31 * oneMinute)
+        assertEquals(1, reminders().count { it.driving })
+        // Already in the vehicle when the car's Bluetooth connects: driving.
+        t = feed(m, drive(5.0) { 0.0 }, t + 40 * oneMinute, walking = false, inVehicle = true)
+        m.onCarBluetooth(t)
+        assertEquals(2, reminders().count { it.driving })
+    }
+
+    @Test
+    fun aPhoneOnATableIsNotABalancePass() {
+        val m = monitor()
+        var t = learnNormal(m)
+        balance(m, BalancePurpose.REFERENCE, stance(31.0, 0.08), t)
+        t += 40_000_000_000L
+        m.requestCheck(t)
+        t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
+        // Phone put down: only sensor noise, no body sway.
+        val r = balance(m, BalancePurpose.CHECK, stance(31.0, 0.0, gyroRms = 0.0), t)
+        assertEquals(BalanceOutcome.TOO_STILL, r.outcome)
+        assertEquals(FitAdvice.DONT_DRIVE, m.report().advice)
+        assertTrue(m.report().recentlyWarned)
+        // Nor can a phone on a table become "my normal balance".
+        t += 40_000_000_000L
+        m.dismissAdvice()
+        val ref = balance(m, BalancePurpose.REFERENCE, stance(31.0, 0.0, gyroRms = 0.0), t + 2 * oneMinute)
+        assertEquals(BalanceOutcome.REFERENCE_REJECTED, ref.outcome)
+    }
+
+    @Test
+    fun aTripGoesOnThroughRedLightsAndEndsAfterThreeMinutesOut() {
+        val trip = TripTracker()
+        val s = 1_000_000_000L
+        assertTrue(trip.update(0, true))
+        assertFalse(trip.update(60 * s, false))   // red light: detection drops...
+        assertFalse(trip.update(120 * s, true))   // ...and comes back: same trip
+        assertFalse(trip.update(200 * s, false))
+        assertFalse(trip.update(299 * s, false))  // under 3 min out
+        assertFalse(trip.update(301 * s, false))  // 3 min out: trip over
+        assertTrue(trip.update(400 * s, true))    // a new trip
+    }
+
     // ---------------------------------------------------------------- set up
 
     @Test

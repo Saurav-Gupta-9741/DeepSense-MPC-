@@ -55,7 +55,10 @@ object FitToDriveStore {
         }
         val balance = JSONArray()
         for (r in s.balanceReferences) balance.put(JSONArray().put(r.wallMillis).put(num(r.swayAccel)).put(num(r.swayGyro)))
-        val json = JSONObject().put("version", 1).put("baseline", baseline).put("balance", balance).toString()
+        val o = JSONObject().put("version", 1).put("baseline", baseline).put("balance", balance)
+        s.warnedWallMillis?.let { o.put("warned", it) }
+        if (s.advice != FitAdvice.NONE && s.adviceWallMillis != null) o.put("advice", s.advice.name).put("advice_at", s.adviceWallMillis)
+        val json = o.toString()
 
         val file = AtomicFile(File(c.filesDir, FILE))
         val out = try { file.startWrite() } catch (e: Exception) { Log.w(TAG, "save", e); return }
@@ -80,7 +83,11 @@ object FitToDriveStore {
             val row = r.getJSONArray(i)
             BalanceReference(row.getLong(0), flt(row, 1), flt(row, 2))
         }
-        FitToDriveState(baseline, refs)
+        val advice = FitAdvice.entries.firstOrNull { it.name == o.optString("advice") } ?: FitAdvice.NONE
+        FitToDriveState(baseline, refs,
+            warnedWallMillis = if (o.has("warned")) o.getLong("warned") else null,
+            advice = advice,
+            adviceWallMillis = if (o.has("advice_at")) o.getLong("advice_at") else null)
     } catch (e: java.io.FileNotFoundException) {
         null
     } catch (e: Exception) {

@@ -615,6 +615,7 @@ class FitToDriveActivity : AppCompatActivity() {
         BalanceOutcome.PASSED -> getString(R.string.fit_say_passed)
         BalanceOutcome.FAILED -> getString(R.string.fit_say_failed)
         BalanceOutcome.MOVED -> getString(R.string.fit_say_moved)
+        BalanceOutcome.TOO_STILL -> getString(R.string.fit_say_too_still)
         BalanceOutcome.NO_REFERENCE -> getString(R.string.fit_say_no_reference)
         BalanceOutcome.REFERENCE_REJECTED -> getString(R.string.fit_say_rejected)
         BalanceOutcome.REFERENCE_SAVED ->
@@ -676,6 +677,7 @@ class FitToDriveActivity : AppCompatActivity() {
                 BalanceOutcome.PASSED -> getString(R.string.fit_balance_passed, b.ratio)
                 BalanceOutcome.FAILED -> getString(R.string.fit_balance_failed, b.ratio)
                 BalanceOutcome.MOVED -> getString(R.string.fit_balance_moved)
+                BalanceOutcome.TOO_STILL -> getString(R.string.fit_balance_too_still)
                 BalanceOutcome.NO_REFERENCE -> getString(R.string.fit_balance_no_reference)
                 BalanceOutcome.REFERENCE_SAVED -> getString(R.string.fit_balance_reference_saved, f.balanceReferences, f.balanceReferencesNeeded)
                 BalanceOutcome.REFERENCE_REJECTED -> getString(R.string.fit_balance_reference_rejected)
@@ -755,6 +757,7 @@ class FitToDriveActivity : AppCompatActivity() {
         BalanceOutcome.FAILED -> Tests.Result(getString(R.string.fit_test_c_failed), true)
         BalanceOutcome.PASSED -> Tests.Result(getString(R.string.fit_test_c_passed), false)
         BalanceOutcome.MOVED -> Tests.Result(getString(R.string.fit_test_c_moved), false)
+        BalanceOutcome.TOO_STILL -> Tests.Result(getString(R.string.fit_balance_too_still), false)
         else -> Tests.Result(getString(R.string.fit_say_no_reference), false)
     }
 }

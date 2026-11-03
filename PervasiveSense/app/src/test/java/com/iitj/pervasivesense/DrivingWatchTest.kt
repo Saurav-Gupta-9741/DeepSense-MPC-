@@ -122,6 +122,30 @@ class DrivingWatchTest {
         assertTrue(w.erratic(oneBrake.t.last() + 120_000_000_000L))
     }
 
+    /** One full up-and-down cycle: a wheel over a speed breaker or through a pothole. */
+    private fun wheelBump(ts: Double, start: Double, duration: Double, peak: Double): Double =
+        if (ts < start || ts > start + duration) 0.0 else peak * sin(2 * PI * (ts - start) / duration)
+
+    @Test
+    fun speedBreakersAndPotholesAreNotHarshBraking() {
+        for ((k, r) in rotations.withIndex()) {
+            val base = drive(90.0, seed = 20 + k) { 0.0 }
+            // A speed breaker every 10 s (front, then rear wheels), up to 8 m/s² vertical.
+            val rec = Recording(base.t.copyOf(), Array(base.size) { i ->
+                val ts = i * 0.02
+                val p = ts % 10.0
+                val peak = if ((ts / 10.0).toInt() % 2 == 0) 8.0 else 4.0
+                val d = base.data[i].copyOf()
+                d[2] += (wheelBump(p, 5.0, 0.6, peak) + wheelBump(p, 5.6, 0.6, peak)).toFloat()
+                d
+            }).rotated(r)
+            val w = DrivingWatch()
+            val events = run(w, rec)
+            assertTrue("rotation $k: ${events.map { "${it.type}=${it.magnitude}" }}", events.none { it.type == DrivingEventType.HARSH_BRAKING })
+            assertFalse(w.erratic(rec.t.last()))
+        }
+    }
+
     @Test
     fun aSuddenJerkOfTheWheelIsJerkySteering() {
         val w = DrivingWatch()

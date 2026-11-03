@@ -76,7 +76,7 @@ early; "I'm not driving" hides the advice but does not end the watch.
 |---|---|
 | A trip starts / the car's Bluetooth connects | Reminder notification (once per trip). Possibly impaired walking is never learned |
 | Driving looks erratic | Notification + voice: *Your driving looks unsteady. Please stop somewhere safe* (at most every 10 min) |
-| Contact alert (opt-in) | When the car's Bluetooth connects (strong sign of driving one's own car) or the driving looks erratic: a **30 s countdown** (spoken, with *Cancel – I'm a passenger* on the screen and in the notification), then a text message to the trusted contact from the user's own phone, with a Google Maps link to the location if location was allowed. At most one alert of each kind per hour. A trip start alone never texts anyone (it may be a cab) |
+| Contact alert (opt-in) | When the car's Bluetooth connects **and** a trip starts within 10 min (Bluetooth alone may be earbuds that call themselves hands-free) or the driving looks erratic: a **30 s countdown** (spoken, with *Cancel – I'm a passenger* on the screen and in the notification), then a text message to the trusted contact from the user's own phone, with a Google Maps link to the location if location was allowed. At most one alert of each kind per hour. A trip start alone never texts anyone (it may be a cab) |
 | "Cancel – I'm a passenger" | The alert is not sent and the driving is no longer watched on this trip |
 
 **Driving watch** (`DrivingWatch.kt`): works with the phone anywhere in the car,
@@ -86,9 +86,19 @@ because it only uses orientation-free signals.
 |---|---|---|
 | Weaving | Turn rate = gyroscope · gravity direction (the car turning), band-passed 0.003–0.6 Hz so pedal/leg movement and long bends drop out | 6 alternating left/right swings ≥ 0.05 rad/s within 30 s (a turn is 1 swing, a lane change 2, a roundabout about 3) |
 | Jerky steering | Same turn rate | Changes by ≥ 0.4 rad/s within 0.5 s (a jerk of the wheel, a swerve) |
-| Harsh braking / acceleration | Length of the 0.5 s mean acceleration vector against 1 g: h = √(\|m\|² − g²) | h ≥ 4 m/s² (≈ 0.4 g, the usual harsh-event level) |
+| Harsh braking / acceleration | 0.5 s mean acceleration vector m; h = min(√(\|m\|² − g²), part of m across the 20 s "up" direction). The length ignores the phone tipping in a pocket; the cross part ignores speed breakers and potholes (vertical) | h ≥ 4 m/s² (real braking of about 6 m/s² and more) |
 
 Driving is *erratic* after one weaving episode or 3 jerky/harsh events within 5 minutes.
+A trip lasts from the first vehicle detection until 3 minutes without one, so red lights and
+traffic jams (where detection drops) do not start a "new trip" that forgets *I'm a passenger*
+or the driving events seen so far.
+
+**Outside factors handled:** a practice test (*Test it*) never causes a reminder or an alert, and a
+real trip clears its advice and checks the walk as usual; a real warning and the 1-hour watch are
+saved at once and survive the app being killed or the phone restarting; a balance check far
+steadier than the user's own recordings (ratio < 0.35: phone put on a table, or sitting) is
+*not valid*, which after a warning means *better not to drive*, and cannot become a "normal
+balance" recording either.
 Tests (synthetic drives, 4 phone orientations): 5 min of city driving with turns,
 lane changes and stops gives nothing; weaving is found in every orientation;
 3 hard brakes make it erratic, 1 does not; a swerve is jerky steering; the phone
@@ -197,14 +207,14 @@ sessions (wlk_7, wlk_8, about 2.5–4 min). It then scored, as a trip started:
 
 Run it locally with `MOTIONSENSE_DIR=<motion-sense/data>`; CI downloads the dataset and runs it on every push.
 
-### Unit tests (53 more, always run)
+### Unit tests (60 more, always run)
 
 | Class | Tests | What it proves |
 |---|---|---|
 | `GaitSegmentExtractorTest` | 5 | Cadence within 8 % of an independent gyroscope-spectrum reference; healthy stride CV < 5 %; features identical under 3 phone rotations (this caught a sign-ambiguity bug); no segments while sitting, standing, not walking or interrupted; works without a gyroscope; impairment moves every feature the expected way |
 | `GaitBaselineTest` | 4 | Thresholds are percentiles of the user's own walks; one-sided scoring; median walk score; daily quota and rolling capacity |
-| `FitToDriveMonitorTest` | 33 | Held-out session normal, impaired walk large gap with an explanation; quarantine and never learning a flagged walk; not scored while learning; trip without a recent walk; each walk scored once; car-Bluetooth trigger; manual check waits for a walk or gives up; disabled = nothing learned; state survives a restart; balance sway is orientation-free and detects walking off; pass/fail against the personal reference; after a large gap only a normal balance clears it; advice expiry; progress. **Drunk-driving cases:** slightly unusual walk → balance offer and never learned; found only while driving → no prompt; driving after a warning → reminder; no balance test in a moving vehicle; implausible normal balance rejected; study session learns nothing; walks in the hand ignored. **Set-up:** the guided walk says recording / halfway / done, or nothing yet and then gives up; walking counts at once while learning; live recording status; 3 balance recordings kept. **Learning safety:** once established, an unchecked very unsteady walk is never learned, an unchecked normal walk is. **Test it:** practice walks are scored (normal → *normal*, wobbly → *large gap* and the balance check) and never learned; a practice walk gives up or can be cancelled. **After "I'm not driving":** a trip within the hour still gets one reminder, none after the hour; a passed balance check ends the watch; weaving after a warning is reported once, not for a confirmed passenger; without a real warning (or after a practice one) driving is never reported |
-| `DrivingWatchTest` | 7 | 5 min of city driving (turns, lane changes, stops, pedal leg movement) is not erratic in 4 phone orientations; weaving is found in all 4; gentle highway drift is not (documented limit); 3 hard brakes are erratic, 1 is not; a swerve is jerky steering; the phone tipping over in the pocket is not braking; without a gyroscope only braking is judged |
+| `FitToDriveMonitorTest` | 39 | Held-out session normal, impaired walk large gap with an explanation; quarantine and never learning a flagged walk; not scored while learning; trip without a recent walk; each walk scored once; car-Bluetooth trigger; manual check waits for a walk or gives up; disabled = nothing learned; state survives a restart; balance sway is orientation-free and detects walking off; pass/fail against the personal reference; after a large gap only a normal balance clears it; advice expiry; progress. **Drunk-driving cases:** slightly unusual walk → balance offer and never learned; found only while driving → no prompt; driving after a warning → reminder; no balance test in a moving vehicle; implausible normal balance rejected; study session learns nothing; walks in the hand ignored. **Set-up:** the guided walk says recording / halfway / done, or nothing yet and then gives up; walking counts at once while learning; live recording status; 3 balance recordings kept. **Learning safety:** once established, an unchecked very unsteady walk is never learned, an unchecked normal walk is. **Test it:** practice walks are scored (normal → *normal*, wobbly → *large gap* and the balance check) and never learned; a practice walk gives up or can be cancelled. **After "I'm not driving":** a trip within the hour still gets one reminder, none after the hour; a passed balance check ends the watch; weaving after a warning is reported once, not for a confirmed passenger; without a real warning (or after a practice one) driving is never reported. **Outside factors:** practice tests B and C followed by the car's Bluetooth and a trip give no reminder and no alert; a warning survives a restart for the rest of its hour (and an active one is shown again); car Bluetooth alone never alerts, Bluetooth plus a trip within 10 min does; a phone on a table is not a balance pass nor a normal-balance recording; a trip goes on through red lights and ends after 3 min out |
+| `DrivingWatchTest` | 8 | 5 min of city driving (turns, lane changes, stops, pedal leg movement) is not erratic in 4 phone orientations; weaving is found in all 4; gentle highway drift is not (documented limit); 3 hard brakes are erratic, 1 is not; a swerve is jerky steering; the phone tipping over in the pocket is not braking; without a gyroscope only braking is judged; speed breakers and potholes (up to 8 m/s²) are not braking in any orientation |
 | `FitToDriveEngineTest` | 4 | End to end through the real-time pipeline (jittered device events → resampler → DeepSense gate → gait → trip start → large gap → advice in the snapshot; balance test refused in the car); the proximity sensor decides pocket walks; with the screen off a walk counts as a pocket walk even if proximity is stuck; the guided walk also counts steps when the activity model misses the walk |
 
 ### Dose-response

@@ -113,7 +113,7 @@ class SensingEngine(
 
     private var vehicleConfidence = -1
     private var vehicleUpdateT = Long.MIN_VALUE
-    private var wasInVehicle = false
+    private val trip = TripTracker()
     var vehicleDetection = VehicleDetection.STARTING
 
     private var hardwareSteps = false
@@ -266,8 +266,8 @@ class SensingEngine(
         if (fallConfirmed) wellness.onFallEvent()
 
         // Fit-to-drive: score the walk that led up to a trip as soon as the trip is detected.
-        if (inVehicle && !wasInVehicle) fitToDrive.onTripStart(t)
-        wasInVehicle = inVehicle
+        // Vehicle detection drops at red lights and in jams: the trip goes on until 3 min out of a vehicle.
+        if (trip.update(t, inVehicle)) fitToDrive.onTripStart(t)
         // During the guided set-up walk, steady stepping (≥ 4 steps in 3 s) also counts as walking.
         val stepping = fitToDrive.walkSessionActive && !inVehicle && stepTimes.size >= 4
         fitToDrive.processSample(t, s, walking = context == "WALKING" || stepping, hasGyro = resampler.hasGyroData,

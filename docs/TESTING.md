@@ -4,7 +4,7 @@ Two suites cover the two halves of the system. Neither re-implements app code
 in another language: the JVM suite runs the real Kotlin engine, and the model
 suite runs the real `.tflite` file in the TFLite version the APK bundles.
 
-## 1. Sensing engine — 103 JVM tests
+## 1. Sensing engine — 110 JVM tests
 
 ```bash
 cd PervasiveSense
