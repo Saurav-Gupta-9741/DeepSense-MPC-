@@ -135,7 +135,11 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnStep2.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnRecordAgain.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnStep3.setOnClickListener { focusContact() }
-        binding.btnCheckNow.setOnClickListener { SensingRepository.requestFitCheck() }
+        binding.btnCheckNow.setOnClickListener {
+            SensingRepository.requestFitCheck()
+            say(getString(R.string.fit_say_check_start))
+        }
+        binding.btnSettingsToggle.setOnClickListener { showSettings(binding.cardSettings.visibility != View.VISIBLE) }
         binding.btnBalanceCheck.setOnClickListener { startBalance(BalancePurpose.CHECK) }
         binding.btnBalanceCancel.setOnClickListener { SensingRepository.cancelBalanceTest(); Tests.cPending = false; voice?.stop() }
         binding.btnTestA.setOnClickListener { startPractice(PracticeWalk.NORMAL) }
@@ -326,8 +330,15 @@ class FitToDriveActivity : AppCompatActivity() {
         render(SensingRepository.status.value, SensingRepository.snapshot.value, SensingRepository.message.value)
     }
 
+    private fun showSettings(show: Boolean) = with(binding) {
+        val v = if (show) View.VISIBLE else View.GONE
+        cardSettings.visibility = v; cardStudy.visibility = v; cardLimits.visibility = v
+        btnSettingsToggle.setText(if (show) R.string.fit_settings_hide else R.string.fit_settings_show)
+    }
+
     private fun focusContact() {
-        binding.scroll.smoothScrollTo(0, binding.cardSettings.top)
+        showSettings(true)
+        binding.scroll.post { binding.scroll.smoothScrollTo(0, binding.cardSettings.top) }
         binding.etContactName.requestFocus()
         getSystemService(InputMethodManager::class.java)?.showSoftInput(binding.etContactName, InputMethodManager.SHOW_IMPLICIT)
     }
@@ -397,7 +408,7 @@ class FitToDriveActivity : AppCompatActivity() {
         } else {
             renderSetup(f, canAct)
             renderCheck(f, canAct)
-            renderTest(f, canAct)
+            cardTest.visibility = View.GONE // "Test it" removed: Check my walk is the test
         }
 
         btnRecordAgain.visibility = if (f.balanceReferences >= f.balanceReferencesNeeded) View.VISIBLE else View.GONE
@@ -473,11 +484,13 @@ class FitToDriveActivity : AppCompatActivity() {
         // Step 1: walk (also learned from everyday pocket walks, but the button guides it).
         step(tvStep1, getString(R.string.fit_step1), walkDone, !walkDone)
         val minutes = minOf(f.baselineWalkMinutes, f.walkMinutesNeeded)
+        val sec = (minutes * 60).toInt()
+        val secNeeded = (f.walkMinutesNeeded * 60).toInt()
         tvStep1Detail.text = when {
             walkDone -> getString(R.string.fit_step1_done)
-            f.walkSession && f.recordingWalk -> getString(R.string.fit_step1_recording, minutes, f.walkMinutesNeeded)
-            f.walkSession -> getString(R.string.fit_step1_waiting, minutes, f.walkMinutesNeeded)
-            minutes > 0f -> getString(R.string.fit_step1_how) + getString(R.string.fit_step1_so_far, minutes, f.walkMinutesNeeded)
+            f.walkSession && f.recordingWalk -> getString(R.string.fit_step1_recording, sec, secNeeded)
+            f.walkSession -> getString(R.string.fit_step1_waiting, sec, secNeeded)
+            minutes > 0f -> getString(R.string.fit_step1_how) + getString(R.string.fit_step1_so_far, sec, secNeeded)
             else -> getString(R.string.fit_step1_how)
         }
         progressStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
@@ -628,9 +641,10 @@ class FitToDriveActivity : AppCompatActivity() {
         val ready = f.baselineStatus != BaselineStatus.LEARNING && f.balanceReferences >= f.balanceReferencesNeeded
         cardCheck.visibility = if (ready) View.VISIBLE else View.GONE
         if (!ready) return@with
+        val checking = f.checkSecondsLeft > 0f
         btnCheckNow.isEnabled = canAct && !f.waitingForWalk
-        btnBalanceCheck.visibility = if (f.balanceReferences > 0) View.VISIBLE else View.GONE
-        btnBalanceCheck.isEnabled = canAct
+        // The balance check is offered by the advice card, only when the walk was different.
+        btnBalanceCheck.visibility = View.GONE
 
         val c = f.lastCheck
         val (level, detail, dot) = when {
@@ -652,10 +666,22 @@ class FitToDriveActivity : AppCompatActivity() {
                 Triple(getString(label), d, col)
             }
         }
+        if (checking) {
+            tvLastLevel.text = getString(R.string.fit_checking, kotlin.math.ceil(f.checkSecondsLeft).toInt())
+            tvLastLevel.setTextColor(color(R.color.text_main))
+            levelDot.backgroundTintList = ColorStateList.valueOf(color(R.color.primary_glow))
+            tvLastDetail.text = getString(R.string.fit_checking_hint)
+            tvLastDetail.visibility = View.VISIBLE
+            tvLastMeta.visibility = View.GONE
+            tvLastBalance.visibility = View.GONE
+            tvLearned.visibility = View.GONE
+            return@with
+        }
+        tvLearned.visibility = View.VISIBLE
         tvLastLevel.text = level
         tvLastLevel.setTextColor(color(if (c?.level != null) dot else R.color.text_main))
         levelDot.backgroundTintList = ColorStateList.valueOf(color(dot))
-        tvLastDetail.text = if (f.waitingForWalk && f.practice == null) getString(R.string.fit_waiting) else detail
+        tvLastDetail.text = detail
         tvLastDetail.visibility = if (tvLastDetail.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         tvLastMeta.text = if (c == null) "" else {
             val trigger = getString(when (c.trigger) {
@@ -670,8 +696,8 @@ class FitToDriveActivity : AppCompatActivity() {
         }
         tvLastMeta.visibility = if (c == null) View.GONE else View.VISIBLE
 
-        val b = f.lastBalance
-        tvLastBalance.visibility = if (b != null) View.VISIBLE else View.GONE
+        val b = f.lastBalance?.takeIf { false }
+        tvLastBalance.visibility = View.GONE
         if (b != null) {
             tvLastBalance.text = when (b.outcome) {
                 BalanceOutcome.PASSED -> getString(R.string.fit_balance_passed, b.ratio)

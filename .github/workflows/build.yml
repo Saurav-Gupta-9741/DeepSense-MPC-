@@ -42,7 +42,7 @@ jobs:
           unzip -q "$RUNNER_TEMP/ms/data/A_DeviceMotion_data.zip" -d "$RUNNER_TEMP/msdata"
           echo "MOTIONSENSE_DIR=$RUNNER_TEMP/msdata" >> "$GITHUB_ENV"
 
-      - name: Engine unit tests (110 JVM tests on real recordings, none skipped)
+      - name: Engine unit tests (111 JVM tests on real recordings, none skipped)
         run: |
           ./gradlew :app:testDebugUnitTest --stacktrace
           ! grep -l "<skipped" app/build/test-results/testDebugUnitTest/*.xml

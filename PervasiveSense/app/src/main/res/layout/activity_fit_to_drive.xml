@@ -710,12 +710,22 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Settings -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSettingsToggle"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="start|center_vertical"
+                android:text="@string/fit_settings_show"
+                android:textColor="@color/primary_glow" />
+
+            <!-- Settings (collapsed until opened) -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardSettings"
                 style="@style/PS.Card"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content">
+                android:layout_height="wrap_content"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -870,6 +880,8 @@
 
             <!-- Study mode: labelled validation sessions (impairment-simulation goggles) -->
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardStudy"
+                android:visibility="gone"
                 style="@style/PS.Card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
@@ -995,6 +1007,8 @@
 
             <!-- How it works and its limits -->
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardLimits"
+                android:visibility="gone"
                 style="@style/PS.Card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">

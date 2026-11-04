@@ -66,6 +66,8 @@ data class FitToDriveReport(
     val segmentsForEstablished: Int,
     val daysForEstablished: Int,
     val waitingForWalk: Boolean,
+    /** "Check my walk" countdown (0 when none is running). */
+    val checkSecondsLeft: Float,
     /** Walking, but the phone is not in a pocket: this walk is not used. */
     val walkingOutsidePocket: Boolean,
     /** Walking with the phone in a pocket right now: this walk is being recorded. */
@@ -158,13 +160,15 @@ class FitToDriveMonitor(
     val config: Config = Config()
 ) {
     data class Config(
-        val segmentsForProvisional: Int = 30,   // ≈ 2 min of walking (4 s per segment)
+        val segmentsForProvisional: Int = 15,   // ≈ 1 min of walking (4 s per segment)
         val segmentsForEstablished: Int = 150,  // ≈ 10 min
         val daysForEstablished: Int = 7,
         val lookbackSec: Float = 300f,          // vehicle detection lags the start of a trip
         val minWalkSegments: Int = 3,           // ≈ 16 s of walking
         val maxWalkSegments: Int = 15,          // the last ≈ minute before the trip
         val manualWaitSec: Float = 180f,
+        /** "Check my walk" scores exactly the walking of this long after the tap. */
+        val checkSec: Float = 30f,
         val practiceWalkSegments: Int = 5,      // ≈ 24 s: a steadier answer for a test walk
         val learnWindowSegments: Int = 15,      // an unchecked walk is judged over ≈ 1 min before it is learned
         /** Until established, "normal" is narrow (often one day): only a clearly unsteady unchecked walk is dropped. */
@@ -215,6 +219,8 @@ class FitToDriveMonitor(
     private var adviceT = Long.MIN_VALUE
     private var waitUntil = Long.MIN_VALUE
     private var practice: PracticeWalk? = null
+    /** "Check my walk" is timing its 30 s walk: scored at the end, never learned as normal. */
+    private var onRequest = false
     /** Time of the last real warning (not from a practice test); cleared by a passed balance check. */
     private var warnedT = Long.MIN_VALUE
     private var lastReminderT = Long.MIN_VALUE
@@ -241,7 +247,7 @@ class FitToDriveMonitor(
     private val warningActive get() = advice == FitAdvice.TAKE_BALANCE_CHECK || advice == FitAdvice.DONT_DRIVE
     /** Possibly impaired right now: do not learn "normal" from it. */
     private val learningBlocked get() =
-        learningPaused || practice != null || warningActive || advice == FitAdvice.CONSIDER_BALANCE_CHECK ||
+        learningPaused || practice != null || onRequest || warningActive || advice == FitAdvice.CONSIDER_BALANCE_CHECK ||
             recentlyWarned(lastT)
 
     private fun recentlyWarned(t: Long) =
@@ -286,6 +292,11 @@ class FitToDriveMonitor(
         walkingNow = walking
         inPocketNow = inPocket
         outsidePocketSince = if (walking && !inPocket) (if (outsidePocketSince == Long.MIN_VALUE) t else outsidePocketSince) else Long.MIN_VALUE
+        if (onRequest && t >= waitUntil) {
+            waitUntil = Long.MIN_VALUE
+            if (!evaluate(t, CheckTrigger.MANUAL)) publishCheck(notScoredCheck(t, CheckTrigger.MANUAL, NotScoredReason.NO_RECENT_WALK))
+            onRequest = false
+        }
         if (waitUntil != Long.MIN_VALUE && t > waitUntil) {
             waitUntil = Long.MIN_VALUE
             val p = practice
@@ -304,7 +315,7 @@ class FitToDriveMonitor(
         recent.addLast(Recent(seg, wall, learnedNow, learnable = !learningBlocked))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         val needed = if (practice != null) config.practiceWalkSegments else config.minWalkSegments
-        if (waitUntil != Long.MIN_VALUE && recent.size >= needed) {
+        if (!onRequest && waitUntil != Long.MIN_VALUE && recent.size >= needed) {
             waitUntil = Long.MIN_VALUE
             evaluate(t, CheckTrigger.MANUAL)
         }
@@ -341,10 +352,19 @@ class FitToDriveMonitor(
         onEvent(FitToDriveEvent.DrivingAfterWarning(CheckTrigger.CAR_BLUETOOTH, advice, dismissed = !warningActive, driving = true))
     }
 
-    /** "Check my walk": scores recent walking, or waits for the user to walk. */
+    /**
+     * "Check my walk": scores only the walking of the next [Config.checkSec] (earlier walking
+     * is never mixed in), at the end of that time. A walk checked on request is never learned
+     * as normal (the user may walk unsteadily on purpose); normal is learned from everyday walking.
+     */
     fun requestCheck(t: Long) {
-        if (!enabled) return
-        if (!evaluate(t, CheckTrigger.MANUAL)) waitUntil = t + secs(config.manualWaitSec)
+        if (!enabled || balanceTest.running) return
+        pruneRecent(t)        // earlier walking is judged and learned (or not) as usual...
+        recent.clear()        // ...but never scored as this check
+        extractor.reset()
+        practice = null
+        onRequest = true
+        waitUntil = t + secs(config.checkSec)
     }
 
     /**
@@ -474,6 +494,7 @@ class FitToDriveMonitor(
         segmentsForEstablished = config.segmentsForEstablished,
         daysForEstablished = config.daysForEstablished,
         waitingForWalk = waitUntil != Long.MIN_VALUE,
+        checkSecondsLeft = if (onRequest) ((waitUntil - t) / 1e9f).coerceAtLeast(0f) else 0f,
         // A few seconds of grace: putting the phone away is not "walking with it in the hand".
         walkingOutsidePocket = outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > 3_000_000_000L,
         recordingWalk = enabled && walkingNow && inPocketNow,
@@ -623,7 +644,7 @@ class FitToDriveMonitor(
             .take(3)
         when (level) {
             // Only a normal walk becomes part of "normal" (a practice walk never does).
-            WalkLevel.NORMAL -> if (p == null) learnAll(pending)
+            WalkLevel.NORMAL -> if (p == null && !onRequest) learnAll(pending)
             WalkLevel.UNUSUAL ->
                 // Before driving, a slightly unusual walk is worth a balance check, as an offer.
                 // Already moving (trip detected late): no prompt for a mild case.

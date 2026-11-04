@@ -262,11 +262,29 @@ class FitToDriveMonitorTest {
         m.requestCheck(t)
         assertTrue(m.report().waitingForWalk)
         val before = checks().size
-        feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        val after = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        assertEquals(before, checks().size) // scored only when the 30 s are over
+        endCheck(m, after)
         assertFalse(m.report().waitingForWalk)
         assertEquals(before + 1, checks().size)
         assertEquals(CheckTrigger.MANUAL, checks().last().trigger)
         assertEquals(WalkLevel.LARGE_GAP, checks().last().level)
+    }
+
+    @Test
+    fun aCheckOnRequestScoresOnlyTheWalkAfterTheTapAndIsNeverLearned() {
+        val m = monitor()
+        var t = learnNormal(m)
+        // A wobbly walk just before the tap is not part of the check...
+        t = feed(m, session3.impaired(1.0), t)
+        m.requestCheck(t)
+        // ...only the normal walk after it is.
+        t = endCheck(m, feed(m, session1, t + 1_000_000_000L))
+        assertEquals(WalkLevel.NORMAL, checks().last().level)
+        val learned = m.report().baselineSegments
+        m.requestCheck(t)
+        endCheck(m, feed(m, session2, t + 1_000_000_000L))
+        assertEquals(learned, m.report().baselineSegments) // a checked walk is never learned
     }
 
     @Test
@@ -554,6 +572,7 @@ class FitToDriveMonitorTest {
         var t = learnNormal(m)
         m.requestCheck(t)
         t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        t = endCheck(m, t)
         assertEquals(WalkLevel.LARGE_GAP, checks().last().level)
         m.dismissAdvice()
         assertEquals(FitAdvice.NONE, m.report().advice)
@@ -586,6 +605,7 @@ class FitToDriveMonitorTest {
         t += 40_000_000_000L
         m.requestCheck(t)
         t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        t = endCheck(m, t)
         assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
         balance(m, BalancePurpose.CHECK, stance(31.0, 0.08, seed = 9), t)
         assertEquals(FitAdvice.BALANCE_OK, m.report().advice)
@@ -686,6 +706,7 @@ class FitToDriveMonitorTest {
         var t = learnNormal(m)
         m.requestCheck(t)
         t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        t = endCheck(m, t)
         val saved = m.exportState()
         assertEquals(FitAdvice.TAKE_BALANCE_CHECK, saved.advice)
         val m2 = monitor()
@@ -722,6 +743,7 @@ class FitToDriveMonitorTest {
         t += 40_000_000_000L
         m.requestCheck(t)
         t = feed(m, session3.impaired(1.0), t + 1_000_000_000L)
+        t = endCheck(m, t)
         assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
         // Phone put down: only sensor noise, no body sway.
         val r = balance(m, BalancePurpose.CHECK, stance(31.0, 0.0, gyroRms = 0.0), t)
@@ -749,6 +771,10 @@ class FitToDriveMonitorTest {
     }
 
     // ---------------------------------------------------------------- set up
+
+    /** Stands still until the 30 s of "Check my walk" are over (the test walks are shorter). */
+    private fun endCheck(m: FitToDriveMonitor, t: Long): Long =
+        feed(m, Recording.constant(31.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
 
     @Test
     fun duringSetUpEveryPocketWalkCountsAtOnce() {
