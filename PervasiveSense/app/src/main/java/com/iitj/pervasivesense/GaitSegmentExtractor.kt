@@ -62,13 +62,20 @@ class GaitSegmentExtractor(
     private val minStrideSec: Float = 0.7f,
     private val maxStrideSec: Float = 2.0f,
     private val minPeriodicity: Float = 0.2f,
-    private val maxGapNanos: Long = 100_000_000L
+    private val maxGapNanos: Long = 100_000_000L,
+    /** A dropout of the walking gate up to this long (a turn, a door, the activity label or the
+     *  pocket sensor flickering) is skipped; only a longer stop restarts the segment. */
+    private val maxDropoutSamples: Int = 75 // 1.5 s
 ) {
     private val buf = FloatArray(segmentSamples * 6)
     private var head = 0
     private var filled = 0
     private var sinceEmit = 0
     private var lastT = Long.MIN_VALUE
+    private var dropout = 0
+    /** Segments that did not pass the quality checks (not a steady walk). */
+    var rejected = 0
+        private set
 
     // Work arrays for the analysis, allocated once.
     private val win = FloatArray(segmentSamples * 6)
@@ -84,12 +91,12 @@ class GaitSegmentExtractor(
     private val peaks = FloatArray(segmentSamples / 10)
 
     fun reset() {
-        head = 0; filled = 0; sinceEmit = 0
+        head = 0; filled = 0; sinceEmit = 0; dropout = 0
     }
 
     /**
-     * Feeds one uniform 50 Hz sample. [walking] gates collection (any other
-     * activity restarts the segment). Returns a segment when one completes and
+     * Feeds one uniform 50 Hz sample. [walking] gates collection (a short dropout
+     * is skipped, a stop of more than 1.5 s restarts the segment). Returns a segment when one completes and
      * passes the quality checks.
      */
     fun processSample(tNanos: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean): GaitSegment? {
@@ -97,16 +104,18 @@ class GaitSegmentExtractor(
         if (lastT != Long.MIN_VALUE && tNanos - lastT > maxGapNanos) reset()
         lastT = tNanos
         if (!walking) {
-            if (filled > 0) reset()
+            // Skipped, not recorded; the segment restarts only after a real stop.
+            if (filled > 0 && ++dropout > maxDropoutSamples) reset()
             return null
         }
+        dropout = 0
         System.arraycopy(s, 0, buf, head * 6, 6)
         head = (head + 1) % segmentSamples
         if (filled < segmentSamples) filled++
         sinceEmit++
         if (filled < segmentSamples || sinceEmit < hopSamples) return null
         sinceEmit = 0
-        return analyse(tNanos, hasGyro)
+        return analyse(tNanos, hasGyro).also { if (it == null) rejected++ }
     }
 
     private fun analyse(tEnd: Long, hasGyro: Boolean): GaitSegment? {

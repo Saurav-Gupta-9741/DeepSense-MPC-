@@ -65,7 +65,10 @@ class GaitSegmentExtractorTest {
         }
         assertEquals(6, produced { true })
         assertEquals(0, produced { false })
-        assertEquals(0, produced { it % 350 != 0 }) // interrupted every 7 s: never 8 s in a row
+        // A short dropout (0.5 s every 5 s: a turn, the label or the pocket sensor flickering) is skipped...
+        assertTrue(produced { it % 250 >= 25 } >= 4)
+        // ...a real stop (2 s every 7 s) restarts the segment: never 8 s of walking in a row.
+        assertEquals(0, produced { it % 350 >= 100 })
     }
 
     @Test
@@ -793,12 +796,11 @@ class FitToDriveMonitorTest {
         val m = monitor() // 15 segments (1 min) needed
         assertTrue(m.startWalkRecording(start))
         assertTrue(m.report().walkSession)
-        assertEquals(120f, m.report(start).walkSessionSecondsLeft, 0.1f)
+        assertEquals(60f, m.report().walkRecordedNeededSec, 0.1f)
         var t = feed(m, session1, start)
+        assertEquals(24f, m.report().walkRecordedSec, 0.1f) // what the screen shows: 0:24 of 1:00
         t = feed(m, session2, t + 1_000_000_000L)
-        // A plain 2-minute timer: it goes on until the end even though enough is learned.
-        assertTrue(m.report().walkSession)
-        t = feed(m, Recording.constant(70.0, 0f, 0f, 9.81f), t, walking = false)
+        // It ends by itself once 1 minute of walking is recorded.
         val stages = events.filterIsInstance<FitToDriveEvent.WalkSession>().map { it.stage }
         assertEquals(listOf(WalkSessionStage.RECORDING, WalkSessionStage.HALFWAY, WalkSessionStage.DONE), stages)
         assertEquals(BaselineStatus.PROVISIONAL, m.report().baselineStatus)
@@ -807,17 +809,53 @@ class FitToDriveMonitorTest {
     }
 
     @Test
-    fun aGuidedWalkWithTooLittleWalkingAsksForOneMoreMinute() {
+    fun aRealWorldWalkWithTurnsPausesAndFlickerIsRecordedWithin90Seconds() {
         val m = monitor()
         assertTrue(m.startWalkRecording(start))
-        var t = feed(m, session1, start) // 30 s: not enough
-        t = feed(m, Recording.constant(95.0, 0f, 0f, 9.81f), t, walking = false)
-        assertEquals(WalkSessionStage.MORE_NEEDED, events.filterIsInstance<FitToDriveEvent.WalkSession>().last().stage)
-        assertTrue(m.report().walkSession)
-        t = feed(m, session2, t)
-        feed(m, Recording.constant(40.0, 0f, 0f, 9.81f), t, walking = false)
+        // Three 30 s walks (90 s) where the activity label drops for 0.6 s every 5 s (turns, doors)
+        // and the pocket sensor reads "uncovered" for 0.3 s every 7 s. Before, each of those
+        // threw the 8 s segment away and the walk was never recorded.
+        val s = FloatArray(6)
+        var t = start
+        var k = 0
+        for (rec in listOf(session1, session2, session3)) {
+            for (i in 0 until rec.size) {
+                rec.data[i].copyInto(s)
+                m.processSample(t + rec.t[i], s, walking = k % 250 >= 30, hasGyro = true, inPocket = k % 350 >= 15,
+                    steps = if (k % 25 == 0) 1 else 0)
+                k++
+            }
+            t += rec.t[rec.size - 1] + 20_000_000L
+        }
         assertEquals(WalkSessionStage.DONE, events.filterIsInstance<FitToDriveEvent.WalkSession>().last().stage)
         assertEquals(BaselineStatus.PROVISIONAL, m.report().baselineStatus)
+        // Brief flickers never make it say "not recording".
+        assertTrue(events.filterIsInstance<FitToDriveEvent.RecordingIssueChanged>().none { it.issue != RecordingIssue.NONE })
+    }
+
+    @Test
+    fun itSaysWhyTheWalkIsNotRecordedAndCountsSteps() {
+        val m = monitor()
+        assertTrue(m.startWalkRecording(start))
+        // Walking with the phone in the hand (watching the screen): not recorded, and it says so.
+        var t = feed(m, session1, start, inPocket = false)
+        assertEquals(RecordingIssue.NOT_IN_POCKET, m.report().recordingIssue)
+        assertEquals(0f, m.report().walkRecordedSec, 0.1f)
+        // Phone in the pocket: recording again.
+        val s = FloatArray(6)
+        for (i in 0 until session2.size) {
+            session2.data[i].copyInto(s)
+            m.processSample(t + 20_000_000L + session2.t[i], s, walking = true, hasGyro = true, steps = if (i % 25 == 0) 1 else 0)
+        }
+        t += 20_000_000L + session2.t[session2.size - 1]
+        assertEquals(RecordingIssue.NONE, m.report().recordingIssue)
+        assertTrue(m.report().walkRecordedSec >= 20f)
+        assertEquals((session2.size + 24) / 25, m.report().guidedSteps)
+        // Standing still: "keep walking".
+        feed(m, Recording.constant(10.0, 0f, 0f, 9.81f), t, walking = false)
+        assertEquals(RecordingIssue.NOT_WALKING, m.report().recordingIssue)
+        val said = events.filterIsInstance<FitToDriveEvent.RecordingIssueChanged>().map { it.issue }
+        assertEquals(listOf(RecordingIssue.NOT_IN_POCKET, RecordingIssue.NONE, RecordingIssue.NOT_WALKING), said)
     }
 
     @Test
@@ -856,7 +894,8 @@ class FitToDriveMonitorTest {
         assertTrue(m.startWalkRecording(start))
         feed(m, Recording.constant(500.0, 0f, 0f, 9.81f), start, walking = false)
         val stages = events.filterIsInstance<FitToDriveEvent.WalkSession>().map { it.stage }
-        assertEquals(listOf(WalkSessionStage.NOTHING_YET, WalkSessionStage.TIMED_OUT), stages)
+        assertEquals(listOf(WalkSessionStage.TIMED_OUT), stages)
+        assertEquals(listOf(RecordingIssue.NOT_WALKING), events.filterIsInstance<FitToDriveEvent.RecordingIssueChanged>().map { it.issue })
         assertFalse(m.report().walkSession)
     }
 

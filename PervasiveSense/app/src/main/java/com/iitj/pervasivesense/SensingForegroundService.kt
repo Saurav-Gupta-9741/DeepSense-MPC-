@@ -391,12 +391,17 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 // The car's Bluetooth plus a trip: driving (Bluetooth alone may be earbuds, a trip alone a cab).
                 if (event.driving) alert().start(AlertKind.DRIVING_AFTER_WARNING)
             }
+            is FitToDriveEvent.RecordingIssueChanged -> speak(getString(when (event.issue) {
+                RecordingIssue.NONE -> R.string.fit_say_rec_again
+                RecordingIssue.NOT_IN_POCKET -> R.string.fit_say_rec_not_pocket
+                RecordingIssue.NOT_WALKING -> R.string.fit_say_rec_not_walking
+                RecordingIssue.NOT_STEADY -> R.string.fit_say_rec_not_steady
+                RecordingIssue.LEARNING_PAUSED -> R.string.fit_say_rec_paused
+            }), interrupt = false)
             is FitToDriveEvent.WalkSession -> speak(getString(when (event.stage) {
                 WalkSessionStage.RECORDING -> R.string.fit_say_walk_recording
                 WalkSessionStage.HALFWAY -> R.string.fit_say_walk_half
                 WalkSessionStage.DONE -> R.string.fit_say_walk_done
-                WalkSessionStage.MORE_NEEDED -> R.string.fit_say_walk_more
-                WalkSessionStage.NOTHING_YET -> R.string.fit_say_walk_not_yet
                 WalkSessionStage.TIMED_OUT -> R.string.fit_say_walk_timeout
             }), interrupt = false)
             is FitToDriveEvent.ErraticDriving -> {

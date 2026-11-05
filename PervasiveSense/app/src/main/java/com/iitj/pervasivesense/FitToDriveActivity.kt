@@ -376,6 +376,14 @@ class FitToDriveActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ rendering
     private fun color(id: Int) = ContextCompat.getColor(this, id)
+    private fun clock(sec: Float): String { val s = sec.toInt(); return String.format(java.util.Locale.US, "%d:%02d", s / 60, s % 60) }
+    private fun issueText(f: FitToDriveReport) = getString(when (f.recordingIssue) {
+        RecordingIssue.NONE -> if (f.recordingWalk) R.string.fit_rec_ok else R.string.fit_step1_waiting
+        RecordingIssue.NOT_IN_POCKET -> R.string.fit_rec_not_pocket
+        RecordingIssue.NOT_WALKING -> R.string.fit_rec_not_walking
+        RecordingIssue.NOT_STEADY -> R.string.fit_rec_not_steady
+        RecordingIssue.LEARNING_PAUSED -> R.string.fit_rec_paused
+    })
     private fun pct(v: Float) = (v * 100).toInt().coerceIn(0, 100)
 
     private fun render(status: ServiceStatus, s: SensingSnapshot?, message: String?) = with(binding) {
@@ -463,7 +471,7 @@ class FitToDriveActivity : AppCompatActivity() {
     /** Set-up, one step after another: walk, then standing balance, then the contact (optional). */
     private fun renderSetup(f: FitToDriveReport, canAct: Boolean) = with(binding) {
         val ctx = this@FitToDriveActivity
-        val walkDone = f.baselineStatus != BaselineStatus.LEARNING && !f.walkSession
+        val walkDone = f.baselineStatus != BaselineStatus.LEARNING
         val balanceDone = f.balanceReferences >= f.balanceReferencesNeeded
         val phone = FitToDriveStore.contactPhone(ctx)
         val contactDone = phone.isNotBlank()
@@ -483,17 +491,15 @@ class FitToDriveActivity : AppCompatActivity() {
 
         // Step 1: walk (also learned from everyday pocket walks, but the button guides it).
         step(tvStep1, getString(R.string.fit_step1), walkDone, !walkDone)
-        // A plain countdown timer: no counted seconds.
-        val left = kotlin.math.ceil(f.walkSessionSecondsLeft).toInt()
-        val clock = String.format(java.util.Locale.US, "%d:%02d", left / 60, left % 60)
+        // What is recorded, in plain numbers, and why not when it is not.
         tvStep1Detail.text = when {
             walkDone -> getString(R.string.fit_step1_done)
-            f.walkSession && f.recordingWalk -> getString(R.string.fit_step1_recording, clock)
-            f.walkSession -> getString(R.string.fit_step1_waiting, clock)
+            f.walkSession -> issueText(f) + "\n" + getString(R.string.fit_step1_recording,
+                clock(f.walkRecordedSec), clock(f.walkRecordedNeededSec), f.guidedSteps)
             else -> getString(R.string.fit_step1_how)
         }
         progressStep1.visibility = if (f.walkSession) View.VISIBLE else View.GONE
-        progressStep1.progress = 100 - pct(f.walkSessionSecondsLeft / 120f)
+        progressStep1.progress = pct(f.walkRecordedSec / f.walkRecordedNeededSec)
         btnStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
         btnStep1.setText(if (f.walkSession) R.string.fit_step1_stop else R.string.fit_step1_start)
         btnStep1.isEnabled = canAct
@@ -669,7 +675,7 @@ class FitToDriveActivity : AppCompatActivity() {
             tvLastLevel.text = getString(R.string.fit_checking, kotlin.math.ceil(f.checkSecondsLeft).toInt())
             tvLastLevel.setTextColor(color(R.color.text_main))
             levelDot.backgroundTintList = ColorStateList.valueOf(color(R.color.primary_glow))
-            tvLastDetail.text = getString(R.string.fit_checking_hint)
+            tvLastDetail.text = issueText(f) + "\n" + getString(R.string.fit_check_recorded, clock(f.walkRecordedSec), f.guidedSteps)
             tvLastDetail.visibility = View.VISIBLE
             tvLastMeta.visibility = View.GONE
             tvLastBalance.visibility = View.GONE
