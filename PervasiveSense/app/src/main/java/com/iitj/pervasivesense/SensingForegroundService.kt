@@ -397,6 +397,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 RecordingIssue.NOT_WALKING -> R.string.fit_say_rec_not_walking
                 RecordingIssue.NOT_STEADY -> R.string.fit_say_rec_not_steady
                 RecordingIssue.LEARNING_PAUSED -> R.string.fit_say_rec_paused
+                RecordingIssue.STUDY_MODE -> R.string.fit_say_rec_study
             }), interrupt = false)
             is FitToDriveEvent.WalkSession -> speak(getString(when (event.stage) {
                 WalkSessionStage.RECORDING -> R.string.fit_say_walk_recording
@@ -424,7 +425,11 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             WalkLevel.NORMAL -> R.string.fit_say_walk_normal
             WalkLevel.UNUSUAL -> R.string.fit_say_walk_unusual
             WalkLevel.LARGE_GAP -> R.string.fit_say_walk_large
-            null -> if (c.notScored == NotScoredReason.NO_RECENT_WALK) R.string.fit_say_walk_none else return
+            null -> when (c.notScored) {
+                NotScoredReason.NO_RECENT_WALK -> R.string.fit_say_walk_none
+                NotScoredReason.TOO_IRREGULAR -> R.string.fit_say_walk_irregular
+                else -> return
+            }
         }
         speak(getString(text))
     }

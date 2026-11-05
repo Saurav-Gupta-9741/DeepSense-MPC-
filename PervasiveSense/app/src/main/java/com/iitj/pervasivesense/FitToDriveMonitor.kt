@@ -5,7 +5,11 @@ import kotlin.math.sqrt
 enum class BaselineStatus { LEARNING, PROVISIONAL, ESTABLISHED }
 enum class WalkLevel { NORMAL, UNUSUAL, LARGE_GAP }
 enum class CheckTrigger { TRIP_START, CAR_BLUETOOTH, MANUAL }
-enum class NotScoredReason { NO_RECENT_WALK, STILL_LEARNING }
+enum class NotScoredReason {
+    NO_RECENT_WALK, STILL_LEARNING,
+    /** Steps were counted, but the walk was too irregular to measure: treated as a warning (balance check). */
+    TOO_IRREGULAR
+}
 
 /**
  * What the user is advised to do. CONSIDER is a gentle offer after a slightly
@@ -20,7 +24,7 @@ enum class BalanceStart { STARTED, REFUSED_WARNING, REFUSED_IN_VEHICLE }
 enum class WalkSessionStage { RECORDING, HALFWAY, DONE, TIMED_OUT }
 
 /** Why the walk is not being recorded right now (set-up walk and Check my walk); NONE = recording. */
-enum class RecordingIssue { NONE, NOT_IN_POCKET, NOT_WALKING, NOT_STEADY, LEARNING_PAUSED }
+enum class RecordingIssue { NONE, NOT_IN_POCKET, NOT_WALKING, NOT_STEADY, LEARNING_PAUSED, STUDY_MODE }
 
 /** "Test it": a practice walk the user does on purpose. It is scored like a real check but never learned. */
 enum class PracticeWalk { NORMAL, WOBBLY }
@@ -182,6 +186,10 @@ class FitToDriveMonitor(
         val manualWaitSec: Float = 180f,
         /** "Check my walk" scores exactly the walking of this long after the tap. */
         val checkSec: Float = 30f,
+        /** ...and if it could not measure the walk although this many segments failed the quality
+         *  checks and at least [irregularMinSteps] steps were counted, the walk is "too irregular". */
+        val irregularSegments: Int = 3,
+        val irregularMinSteps: Int = 20,
         val practiceWalkSegments: Int = 5,      // ≈ 24 s: a steadier answer for a test walk
         val learnWindowSegments: Int = 15,      // an unchecked walk is judged over ≈ 1 min before it is learned
         /** Until established, "normal" is narrow (often one day): only a clearly unsteady unchecked walk is dropped. */
@@ -254,6 +262,12 @@ class FitToDriveMonitor(
     private var notWalkingSince = Long.MIN_VALUE
     private var issue = RecordingIssue.NONE
     private var rejectedAtLastSegment = 0
+    private var rejectedAtStart = 0
+    /** A reason waits [ISSUE_STABLE_SEC] before it is shown and spoken (no chatter from flicker). */
+    private var pendingIssue = RecordingIssue.NONE
+    private var pendingSince = Long.MIN_VALUE
+    /** The set-up walk gave up: its last reason stays on screen until the next start. */
+    private var sessionFailedIssue: RecordingIssue? = null
     /** Last sample counted as walking from steps alone (the activity model did not say WALKING). */
     private var stepsOnlyT = Long.MIN_VALUE
     /** "Check my walk" is running (the engine then also accepts steps as walking). */
@@ -267,6 +281,7 @@ class FitToDriveMonitor(
     private var inPocketNow = true
 
     private val segmentSeconds get() = extractor.hopSamples / 50f
+    private companion object { const val ISSUE_STABLE_SEC = 3f }
     private val warningActive get() = advice == FitAdvice.TAKE_BALANCE_CHECK || advice == FitAdvice.DONT_DRIVE
     /** Possibly impaired right now: do not learn "normal" from it. */
     private val learningBlocked get() =
@@ -319,7 +334,21 @@ class FitToDriveMonitor(
         if (walkSessionActive || onRequest) guidedClock(t, walking, steps)
         if (onRequest && t >= waitUntil) {
             waitUntil = Long.MIN_VALUE
-            if (!evaluate(t, CheckTrigger.MANUAL)) publishCheck(notScoredCheck(t, CheckTrigger.MANUAL, NotScoredReason.NO_RECENT_WALK))
+            if (!evaluate(t, CheckTrigger.MANUAL)) {
+                // Plenty of steps but the segments failed the quality checks: a staggering walk is
+                // exactly what must not pass as "no walk". Not measurable -> take the balance check.
+                val irregular = extractor.rejected - rejectedAtStart >= config.irregularSegments &&
+                    guidedSteps >= config.irregularMinSteps
+                if (irregular) {
+                    advice = FitAdvice.TAKE_BALANCE_CHECK
+                    adviceT = t
+                    practiceAdvice = false
+                    warnedT = t
+                    onEvent(FitToDriveEvent.StateChanged)
+                }
+                publishCheck(notScoredCheck(t, CheckTrigger.MANUAL,
+                    if (irregular) NotScoredReason.TOO_IRREGULAR else NotScoredReason.NO_RECENT_WALK))
+            }
             onRequest = false
             if (!walkSessionActive) issue = RecordingIssue.NONE
         }
@@ -431,8 +460,10 @@ class FitToDriveMonitor(
 
     private fun walkSessionClock(t: Long) {
         if (t - walkSessionStart > secs(config.walkSessionSec)) {
+            val why = if (issue != RecordingIssue.NONE) issue else pendingIssue
             walkSessionStage(WalkSessionStage.TIMED_OUT)
             stopWalkRecording()
+            sessionFailedIssue = why
         }
     }
 
@@ -441,7 +472,11 @@ class FitToDriveMonitor(
         guidedSteps = 0
         notWalkingSince = Long.MIN_VALUE
         issue = RecordingIssue.NONE
+        pendingIssue = RecordingIssue.NONE
+        pendingSince = Long.MIN_VALUE
+        sessionFailedIssue = null
         rejectedAtLastSegment = extractor.rejected
+        rejectedAtStart = extractor.rejected
     }
 
     /**
@@ -454,18 +489,24 @@ class FitToDriveMonitor(
         notWalkingSince = if (walking) Long.MIN_VALUE else if (notWalkingSince == Long.MIN_VALUE) t else notWalkingSince
         if (t - guidedStart < secs(8f)) return
         val next = when {
+            walkSessionActive && learningPaused -> RecordingIssue.STUDY_MODE
             walkSessionActive && learningBlocked -> RecordingIssue.LEARNING_PAUSED
             outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > secs(2f) -> RecordingIssue.NOT_IN_POCKET
             notWalkingSince != Long.MIN_VALUE && t - notWalkingSince > secs(3f) -> RecordingIssue.NOT_WALKING
-            // Walking in the pocket, but the last two 8 s segments failed the quality checks.
-            extractor.rejected - rejectedAtLastSegment >= 2 -> RecordingIssue.NOT_STEADY
-            issue == RecordingIssue.NOT_STEADY -> RecordingIssue.NOT_STEADY
+            // Set-up walk only: in the pocket and walking, but the last two 8 s segments failed the
+            // quality checks. (During a check an unsteady walk is the point: never asked to walk steadily.)
+            walkSessionActive && extractor.rejected - rejectedAtLastSegment >= 2 -> RecordingIssue.NOT_STEADY
+            walkSessionActive && issue == RecordingIssue.NOT_STEADY -> RecordingIssue.NOT_STEADY
             else -> RecordingIssue.NONE
         }
-        setIssue(next)
+        // Not in the pocket / not walking: the earlier failed segments are no evidence about the next walk.
+        if (next == RecordingIssue.NOT_WALKING || next == RecordingIssue.NOT_IN_POCKET) rejectedAtLastSegment = extractor.rejected
+        if (next != pendingIssue) { pendingIssue = next; pendingSince = t }
+        if (t - pendingSince >= secs(ISSUE_STABLE_SEC)) setIssue(next)
     }
 
     private fun setIssue(next: RecordingIssue) {
+        pendingIssue = next
         if (next == issue) return
         issue = next
         onEvent(FitToDriveEvent.RecordingIssueChanged(next))
@@ -565,10 +606,11 @@ class FitToDriveMonitor(
         walkingOutsidePocket = outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > 3_000_000_000L,
         recordingWalk = enabled && walkingNow && inPocketNow,
         walkSession = walkSessionActive,
-        walkRecordedSec = (if (onRequest) recent.size else minOf(baseline.size, config.segmentsForProvisional)) * segmentSeconds,
+        walkRecordedSec = if (onRequest) (if (recent.isEmpty()) 0f else extractor.segmentSamples / 50f + (recent.size - 1) * segmentSeconds)
+            else minOf(baseline.size, config.segmentsForProvisional) * segmentSeconds,
         walkRecordedNeededSec = config.segmentsForProvisional * segmentSeconds,
         guidedSteps = guidedSteps,
-        recordingIssue = if (walkSessionActive || onRequest) issue else RecordingIssue.NONE,
+        recordingIssue = if (walkSessionActive || onRequest) issue else sessionFailedIssue ?: RecordingIssue.NONE,
         walkMinutesNeeded = config.segmentsForProvisional * segmentSeconds / 60f,
         learningPaused = learningPaused,
         practice = practice,

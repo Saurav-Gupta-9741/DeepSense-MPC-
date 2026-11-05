@@ -383,6 +383,7 @@ class FitToDriveActivity : AppCompatActivity() {
         RecordingIssue.NOT_WALKING -> R.string.fit_rec_not_walking
         RecordingIssue.NOT_STEADY -> R.string.fit_rec_not_steady
         RecordingIssue.LEARNING_PAUSED -> R.string.fit_rec_paused
+        RecordingIssue.STUDY_MODE -> R.string.fit_rec_study
     })
     private fun pct(v: Float) = (v * 100).toInt().coerceIn(0, 100)
 
@@ -496,6 +497,8 @@ class FitToDriveActivity : AppCompatActivity() {
             walkDone -> getString(R.string.fit_step1_done)
             f.walkSession -> issueText(f) + "\n" + getString(R.string.fit_step1_recording,
                 clock(f.walkRecordedSec), clock(f.walkRecordedNeededSec), f.guidedSteps)
+            // The last walk gave up: say why, then how.
+            f.recordingIssue != RecordingIssue.NONE -> getString(R.string.fit_step1_failed, issueText(f)) + "\n" + getString(R.string.fit_step1_how)
             else -> getString(R.string.fit_step1_how)
         }
         progressStep1.visibility = if (f.walkSession) View.VISIBLE else View.GONE
@@ -655,8 +658,12 @@ class FitToDriveActivity : AppCompatActivity() {
         val (level, detail, dot) = when {
             c == null -> Triple(getString(R.string.fit_no_check_yet), "", R.color.text_muted)
             c.level == null -> Triple(
-                getString(if (c.notScored == NotScoredReason.STILL_LEARNING) R.string.fit_not_scored_learning else R.string.fit_not_scored_no_walk),
-                "", R.color.text_muted)
+                getString(when (c.notScored) {
+                    NotScoredReason.STILL_LEARNING -> R.string.fit_not_scored_learning
+                    NotScoredReason.TOO_IRREGULAR -> R.string.fit_not_scored_irregular
+                    else -> R.string.fit_not_scored_no_walk
+                }),
+                "", if (c.notScored == NotScoredReason.TOO_IRREGULAR) R.color.accent_rose else R.color.text_muted)
             else -> {
                 val (label, col) = when (c.level) {
                     WalkLevel.NORMAL -> R.string.fit_level_normal to R.color.accent_emerald

@@ -7,7 +7,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.PI
 import kotlin.math.max
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 private fun median(xs: List<Float>): Float = xs.sorted().let { it[it.size / 2] }
@@ -834,6 +836,40 @@ class FitToDriveMonitorTest {
     }
 
     @Test
+    fun aWalkTooIrregularToMeasureIsAWarningNotNoWalk() {
+        val m = monitor()
+        var t = learnNormal(m)
+        m.requestCheck(t)
+        // Stepping (counted) but staggering so badly that no 8 s segment passes the quality checks.
+        // A slow lurching sway (3 s cycle, 3 m/s²): real movement, but no 0.7-2 s stride rhythm.
+        val rec = Recording(LongArray(31 * 50) { it * 20_000_000L }, Array(31 * 50) { i ->
+            floatArrayOf(0.4f * sin(i * 0.37).toFloat(), 0f, 9.81f + 3f * sin(2 * PI * i / 150.0).toFloat(), 0f, 0f, 0f)
+        })
+        val s = FloatArray(6)
+        for (i in 0 until rec.size) {
+            rec.data[i].copyInto(s)
+            m.processSample(t + rec.t[i], s, walking = true, hasGyro = true, steps = if (i % 25 == 0) 1 else 0)
+        }
+        t += rec.t[rec.size - 1]
+        endCheck(m, t)
+        assertEquals(NotScoredReason.TOO_IRREGULAR, checks().last().notScored)
+        assertEquals(FitAdvice.TAKE_BALANCE_CHECK, m.report().advice)
+        assertTrue(m.report().recentlyWarned)
+        // During a check it is never told to "walk steadily".
+        assertTrue(events.filterIsInstance<FitToDriveEvent.RecordingIssueChanged>().none { it.issue == RecordingIssue.NOT_STEADY })
+    }
+
+    @Test
+    fun standingStillDuringACheckIsStillNoWalk() {
+        val m = monitor()
+        val t = learnNormal(m)
+        m.requestCheck(t)
+        endCheck(m, t)
+        assertEquals(NotScoredReason.NO_RECENT_WALK, checks().last().notScored)
+        assertEquals(FitAdvice.NONE, m.report().advice)
+    }
+
+    @Test
     fun itSaysWhyTheWalkIsNotRecordedAndCountsSteps() {
         val m = monitor()
         assertTrue(m.startWalkRecording(start))
@@ -1001,7 +1037,8 @@ class FitToDriveEngineTest {
         e.setFitToDriveEnabled(true)
         e.setUiVisible(true)
         e.setProximityAvailable(true)
-        e.onProximity(false) // uncovered: in the hand
+        e.onProximity(true)  // a working sensor reads "covered" at some point...
+        e.onProximity(false) // ...uncovered: in the hand
         for (ev in deviceEvents(session2, startNanos = 1_000_000_000L)) if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
         assertTrue(fit.none { it is FitToDriveEvent.SegmentMeasured })
         assertTrue(snaps.last().fitToDrive.walkingOutsidePocket)

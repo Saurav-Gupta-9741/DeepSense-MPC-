@@ -122,6 +122,8 @@ class SensingEngine(
     // Proximity sensor: covered = phone in a pocket (fit-to-drive learns and scores pocket walks only).
     private var proximityAvailable = false
     private var proximityNear = false
+    /** Some phones' proximity sensors only work during calls and never read "covered": then it is ignored. */
+    private var proximitySeenNear = false
     /**
      * Many phones stop reporting the proximity sensor once the screen is off, leaving it
      * stuck at "uncovered" from the moment the phone was put away. A walk with the
@@ -175,7 +177,7 @@ class SensingEngine(
     /** Whether the phone has a proximity sensor; without one every walk counts as a pocket walk. */
     fun setProximityAvailable(available: Boolean) { proximityAvailable = available }
 
-    fun onProximity(near: Boolean) { proximityNear = near }
+    fun onProximity(near: Boolean) { proximityNear = near; if (near) proximitySeenNear = true }
     fun setScreenOn(on: Boolean) { screenOn = on }
 
     /** A labelled study session (e.g. impairment goggles): measure and log, never learn. */
@@ -272,11 +274,13 @@ class SensingEngine(
         // walking and may call an unsteady walk something else, which is exactly the walk to check.
         // Running is never a walk; stairs only count during the set-up walk and "Check my walk".
         val guided = fitToDrive.walkSessionActive || fitToDrive.checkRunning
-        val stepping = !inVehicle && stepTimes.size >= (if (guided) 3 else 4) && context != "RUNNING" &&
+        // A brisk walk the model calls RUNNING still counts while guided if the cadence is a walk's (< 2.5 steps/s).
+        val stepping = !inVehicle && stepTimes.size >= (if (guided) 3 else 4) &&
+            (context != "RUNNING" || (guided && stepTimes.size <= 7)) &&
             (guided || (context != "STAIRS_UP" && context != "STAIRS_DOWN"))
         val modelWalking = context == "WALKING"
         fitToDrive.processSample(t, s, walking = modelWalking || stepping, hasGyro = resampler.hasGyroData,
-            inPocket = !proximityAvailable || proximityNear || !screenOn, inVehicle = inVehicle,
+            inPocket = !proximityAvailable || !proximitySeenNear || proximityNear || !screenOn, inVehicle = inVehicle,
             stepsOnly = !modelWalking && stepping, steps = newSteps)
 
         samplesSinceInference++
