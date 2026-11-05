@@ -13,7 +13,12 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
+import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.net.Uri
 import android.telephony.SmsManager
+import android.telephony.SubscriptionManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -145,31 +150,83 @@ class ContactAlert(
             text += context.getString(R.string.fit_sms_location,
                 String.format(Locale.US, "https://maps.google.com/?q=%.5f,%.5f", loc.latitude, loc.longitude))
         }
-        val ok = sendSms(FitToDriveStore.contactPhone(context), text)
-        if (ok) lastSent[k] = SystemClock.elapsedRealtime()
-        val at = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val result = context.getString(if (ok) R.string.fit_alert_sent else R.string.fit_alert_failed, contactName(), at)
-        notificationManager.notify(NOTIFICATION_ID, NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(result)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(openScreen())
-            .setAutoCancel(true)
-            .build())
-        SensingRepository.setMessage(result)
-        say(context.getString(if (ok) R.string.fit_say_alert_sent else R.string.fit_say_alert_failed))
+        val phone = FitToDriveStore.contactPhone(context)
+        // "Sent" only once the network confirms; on failure Messages is one tap away.
+        sendSms(phone, text) { ok, code ->
+            if (ok) lastSent[k] = SystemClock.elapsedRealtime()
+            val at = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            val result = if (ok) context.getString(R.string.fit_alert_sent, contactName(), at)
+                else context.getString(R.string.fit_alert_failed, contactName(), at) + " (" + code + ")"
+            val n = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(result)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(if (ok) openScreen() else openMessages(phone, text))
+                .setAutoCancel(true)
+            if (!ok) n.setContentText(context.getString(R.string.fit_alert_open_messages))
+            notificationManager.notify(NOTIFICATION_ID, n.build())
+            SensingRepository.setMessage(result)
+            say(context.getString(if (ok) R.string.fit_say_alert_sent else R.string.fit_say_alert_failed))
+        }
     }
 
-    @SuppressLint("MissingPermission") // checked in ready()
-    private fun sendSms(phone: String, text: String): Boolean = try {
-        val sms = if (Build.VERSION.SDK_INT >= 31) context.getSystemService(SmsManager::class.java)
-            else @Suppress("DEPRECATION") SmsManager.getDefault()
-        sms.sendMultipartTextMessage(phone, null, sms.divideMessage(text), null, null)
-        true
-    } catch (e: Exception) {
-        Log.e(TAG, "SMS failed", e)
-        false
+    /** The SIM to text from: the default SMS SIM, or (dual SIM set to "ask every time") the calls SIM. */
+    private fun smsManager(): SmsManager {
+        val ids = listOf(SubscriptionManager.getDefaultSmsSubscriptionId(),
+            SubscriptionManager.getDefaultVoiceSubscriptionId(), SubscriptionManager.getDefaultSubscriptionId())
+        val id = ids.firstOrNull { it != SubscriptionManager.INVALID_SUBSCRIPTION_ID }
+        return if (Build.VERSION.SDK_INT >= 31) {
+            val base = context.getSystemService(SmsManager::class.java)
+            if (id != null) base.createForSubscriptionId(id) else base
+        } else {
+            @Suppress("DEPRECATION")
+            if (id != null) SmsManager.getSmsManagerForSubscriptionId(id) else SmsManager.getDefault()
+        }
     }
+
+    @SuppressLint("MissingPermission", "UnspecifiedRegisterReceiverFlag") // permission checked in ready()
+    private fun sendSms(phone: String, text: String, done: (Boolean, String) -> Unit) {
+        val number = phone.filter { it.isDigit() || it == '+' }
+        val action = "com.iitj.pervasivesense.SMS_SENT." + SystemClock.elapsedRealtime()
+        var finished = false
+        fun finish(ok: Boolean, code: String) { if (!finished) { finished = true; done(ok, code) } }
+        try {
+            val sms = smsManager()
+            val parts = sms.divideMessage(text)
+            var pending = parts.size
+            var failed: String? = null
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    if (resultCode != Activity.RESULT_OK && failed == null) failed = "error $resultCode"
+                    if (--pending > 0) return
+                    runCatching { context.unregisterReceiver(this) }
+                    finish(failed == null, failed ?: "")
+                }
+            }
+            val filter = IntentFilter(action)
+            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else context.registerReceiver(receiver, filter)
+            val sent = ArrayList(parts.indices.map {
+                PendingIntent.getBroadcast(context, 40 + it, Intent(action).setPackage(context.packageName),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            })
+            sms.sendMultipartTextMessage(number, null, parts, sent, null)
+            // No answer from the network within 60 s: say so rather than claim it was sent.
+            handler.postDelayed({
+                if (!finished) runCatching { context.unregisterReceiver(receiver) }
+                finish(false, "no answer from the network")
+            }, 60_000L)
+        } catch (e: Exception) {
+            Log.e(TAG, "SMS failed", e)
+            finish(false, e.javaClass.simpleName)
+        }
+    }
+
+    /** Opens Messages with the alert written in, to send it by hand. */
+    private fun openMessages(phone: String, text: String) = PendingIntent.getActivity(context, 33,
+        Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phone))).putExtra("sms_body", text)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun openScreen() = PendingIntent.getActivity(context, 31,
         Intent(context, FitToDriveActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),

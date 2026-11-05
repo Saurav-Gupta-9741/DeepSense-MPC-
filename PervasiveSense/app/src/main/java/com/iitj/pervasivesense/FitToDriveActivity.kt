@@ -463,7 +463,7 @@ class FitToDriveActivity : AppCompatActivity() {
     /** Set-up, one step after another: walk, then standing balance, then the contact (optional). */
     private fun renderSetup(f: FitToDriveReport, canAct: Boolean) = with(binding) {
         val ctx = this@FitToDriveActivity
-        val walkDone = f.baselineStatus != BaselineStatus.LEARNING
+        val walkDone = f.baselineStatus != BaselineStatus.LEARNING && !f.walkSession
         val balanceDone = f.balanceReferences >= f.balanceReferencesNeeded
         val phone = FitToDriveStore.contactPhone(ctx)
         val contactDone = phone.isNotBlank()
@@ -483,18 +483,17 @@ class FitToDriveActivity : AppCompatActivity() {
 
         // Step 1: walk (also learned from everyday pocket walks, but the button guides it).
         step(tvStep1, getString(R.string.fit_step1), walkDone, !walkDone)
-        val minutes = minOf(f.baselineWalkMinutes, f.walkMinutesNeeded)
-        val sec = (minutes * 60).toInt()
-        val secNeeded = (f.walkMinutesNeeded * 60).toInt()
+        // A plain countdown timer: no counted seconds.
+        val left = kotlin.math.ceil(f.walkSessionSecondsLeft).toInt()
+        val clock = String.format(java.util.Locale.US, "%d:%02d", left / 60, left % 60)
         tvStep1Detail.text = when {
             walkDone -> getString(R.string.fit_step1_done)
-            f.walkSession && f.recordingWalk -> getString(R.string.fit_step1_recording, sec, secNeeded)
-            f.walkSession -> getString(R.string.fit_step1_waiting, sec, secNeeded)
-            minutes > 0f -> getString(R.string.fit_step1_how) + getString(R.string.fit_step1_so_far, sec, secNeeded)
+            f.walkSession && f.recordingWalk -> getString(R.string.fit_step1_recording, clock)
+            f.walkSession -> getString(R.string.fit_step1_waiting, clock)
             else -> getString(R.string.fit_step1_how)
         }
-        progressStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
-        progressStep1.progress = pct(f.baselineSegments.toFloat() / f.segmentsForProvisional)
+        progressStep1.visibility = if (f.walkSession) View.VISIBLE else View.GONE
+        progressStep1.progress = 100 - pct(f.walkSessionSecondsLeft / 120f)
         btnStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
         btnStep1.setText(if (f.walkSession) R.string.fit_step1_stop else R.string.fit_step1_start)
         btnStep1.isEnabled = canAct

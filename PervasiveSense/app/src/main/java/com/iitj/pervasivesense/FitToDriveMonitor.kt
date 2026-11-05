@@ -17,7 +17,7 @@ enum class BalancePurpose { CHECK, REFERENCE }
 enum class BalanceOutcome { PASSED, FAILED, MOVED, TOO_STILL, NO_REFERENCE, REFERENCE_SAVED, REFERENCE_REJECTED }
 enum class BalanceStart { STARTED, REFUSED_WARNING, REFUSED_IN_VEHICLE }
 /** Guided set-up walk ("Start walk recording"): spoken feedback while the phone is in the pocket. */
-enum class WalkSessionStage { RECORDING, HALFWAY, DONE, NOTHING_YET, TIMED_OUT }
+enum class WalkSessionStage { RECORDING, HALFWAY, DONE, MORE_NEEDED, NOTHING_YET, TIMED_OUT }
 
 /** "Test it": a practice walk the user does on purpose. It is scored like a real check but never learned. */
 enum class PracticeWalk { NORMAL, WOBBLY }
@@ -74,6 +74,8 @@ data class FitToDriveReport(
     val recordingWalk: Boolean,
     /** The guided set-up walk ("Start walk recording") is running. */
     val walkSession: Boolean,
+    /** Set-up walk countdown (0 when none is running). */
+    val walkSessionSecondsLeft: Float,
     /** Minutes of pocket walking needed before checks can run. */
     val walkMinutesNeeded: Float,
     /** A study session is labelled: nothing is learned. */
@@ -182,9 +184,11 @@ class FitToDriveMonitor(
         val reminderCooldownSec: Float = 600f,
         val erraticCooldownSec: Float = 600f,
         /** The guided set-up walk gives up after this long. */
-        val walkSessionSec: Float = 420f,
+        val walkSessionSec: Float = 120f,
+        /** ...plus this once more if the walk is still not learned (too many stops or turns). */
+        val walkSessionExtraSec: Float = 60f,
         /** ...and says "nothing recorded yet" if no walking was recorded this long after the start. */
-        val walkSessionNudgeSec: Float = 60f,
+        val walkSessionNudgeSec: Float = 30f,
         /** Car Bluetooth counts as driving only if a trip starts within this time (earbuds never do). */
         val carBluetoothTripSec: Float = 600f,
         /** A balance check this much steadier than the user's own recordings is not valid. */
@@ -235,6 +239,11 @@ class FitToDriveMonitor(
     /** Restored warning (wall times), applied on the first sample once sensor time is known. */
     private var restoredWarning: FitToDriveState? = null
     private val walkSessionStages = HashSet<WalkSessionStage>()
+    private var walkSessionEnd = Long.MIN_VALUE
+    /** Last sample counted as walking from steps alone (the activity model did not say WALKING). */
+    private var stepsOnlyT = Long.MIN_VALUE
+    /** "Check my walk" is running (the engine then also accepts steps as walking). */
+    val checkRunning get() = onRequest
 
     /** The guided set-up walk is running (the engine then also accepts steps as walking). */
     val walkSessionActive get() = walkSessionStart != Long.MIN_VALUE
@@ -279,8 +288,9 @@ class FitToDriveMonitor(
      * [inVehicle]: a trip is in progress; after a warning the driving is watched.
      */
     fun processSample(t: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean, inPocket: Boolean = true,
-                      inVehicle: Boolean = false) {
+                      inVehicle: Boolean = false, stepsOnly: Boolean = false) {
         lastT = t
+        if (walking && stepsOnly) stepsOnlyT = t
         restoredWarning?.let { applyRestoredWarning(t, it) }
         balanceTest.processSample(t, s, hasGyro)?.let { finishBalance(t, it) }
         if (advice != FitAdvice.NONE && adviceT != Long.MIN_VALUE && t - adviceT > secs(config.adviceExpirySec)) {
@@ -307,12 +317,16 @@ class FitToDriveMonitor(
         val seg = extractor.processSample(t, s, walking && inPocket, hasGyro) ?: return
         val wall = wallClockOf(t)
         // Setup: nothing can be checked yet, so there is no walk to protect; learn at once.
-        val learnedNow = status() == BaselineStatus.LEARNING && learn(seg, wall)
+        // Walking seen only from steps (an unsteady walk the activity model did not call WALKING)
+        // is scored, but learned as normal only during the guided set-up walk.
+        val stepsOnlySeg = stepsOnlyT != Long.MIN_VALUE && t - stepsOnlyT < secs(10f)
+        val learnable = !learningBlocked && (!stepsOnlySeg || walkSessionActive)
+        val learnedNow = status() == BaselineStatus.LEARNING && learnable && learn(seg, wall)
         if (learnedNow) {
             onEvent(FitToDriveEvent.StateChanged)
             if (walkSessionActive) walkSessionProgress()
         }
-        recent.addLast(Recent(seg, wall, learnedNow, learnable = !learningBlocked))
+        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         val needed = if (practice != null) config.practiceWalkSegments else config.minWalkSegments
         if (!onRequest && waitUntil != Long.MIN_VALUE && recent.size >= needed) {
@@ -375,33 +389,38 @@ class FitToDriveMonitor(
     fun startWalkRecording(t: Long): Boolean {
         if (!enabled || status() != BaselineStatus.LEARNING || balanceTest.running) return false
         walkSessionStart = t
+        walkSessionEnd = t + secs(config.walkSessionSec)
         walkSessionStages.clear()
         extractor.reset()
         return true
     }
 
-    fun stopWalkRecording() { walkSessionStart = Long.MIN_VALUE }
+    fun stopWalkRecording() { walkSessionStart = Long.MIN_VALUE; walkSessionEnd = Long.MIN_VALUE }
 
     private fun walkSessionStage(stage: WalkSessionStage) {
         if (walkSessionStages.add(stage)) onEvent(FitToDriveEvent.WalkSession(stage))
     }
 
-    private fun walkSessionProgress() {
-        walkSessionStage(WalkSessionStage.RECORDING)
-        when {
-            status() != BaselineStatus.LEARNING -> { walkSessionStage(WalkSessionStage.DONE); stopWalkRecording() }
-            baseline.size * 2 >= config.segmentsForProvisional -> walkSessionStage(WalkSessionStage.HALFWAY)
-        }
-    }
+    private fun walkSessionProgress() = walkSessionStage(WalkSessionStage.RECORDING)
 
+    /** The set-up walk is a plain timer (2 min): all pocket walking in it is recorded. */
     private fun walkSessionClock(t: Long) {
         val elapsed = t - walkSessionStart
         if (WalkSessionStage.RECORDING !in walkSessionStages && elapsed > secs(config.walkSessionNudgeSec)) {
             walkSessionStage(WalkSessionStage.NOTHING_YET)
         }
-        if (elapsed > secs(config.walkSessionSec)) {
-            walkSessionStage(WalkSessionStage.TIMED_OUT)
-            stopWalkRecording()
+        if (WalkSessionStage.RECORDING in walkSessionStages && elapsed > secs(config.walkSessionSec / 2)) {
+            walkSessionStage(WalkSessionStage.HALFWAY)
+        }
+        if (t < walkSessionEnd) return
+        when {
+            status() != BaselineStatus.LEARNING -> { walkSessionStage(WalkSessionStage.DONE); stopWalkRecording() }
+            // Some walking, but too many stops or turns: one more minute.
+            WalkSessionStage.RECORDING in walkSessionStages && WalkSessionStage.MORE_NEEDED !in walkSessionStages -> {
+                walkSessionStage(WalkSessionStage.MORE_NEEDED)
+                walkSessionEnd = t + secs(config.walkSessionExtraSec)
+            }
+            else -> { walkSessionStage(WalkSessionStage.TIMED_OUT); stopWalkRecording() }
         }
     }
 
@@ -499,6 +518,7 @@ class FitToDriveMonitor(
         walkingOutsidePocket = outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > 3_000_000_000L,
         recordingWalk = enabled && walkingNow && inPocketNow,
         walkSession = walkSessionActive,
+        walkSessionSecondsLeft = if (walkSessionActive) ((walkSessionEnd - t) / 1e9f).coerceAtLeast(0f) else 0f,
         walkMinutesNeeded = config.segmentsForProvisional * segmentSeconds / 60f,
         learningPaused = learningPaused,
         practice = practice,

@@ -268,10 +268,16 @@ class SensingEngine(
         // Fit-to-drive: score the walk that led up to a trip as soon as the trip is detected.
         // Vehicle detection drops at red lights and in jams: the trip goes on until 3 min out of a vehicle.
         if (trip.update(t, inVehicle)) fitToDrive.onTripStart(t)
-        // During the guided set-up walk, steady stepping (≥ 4 steps in 3 s) also counts as walking.
-        val stepping = fitToDrive.walkSessionActive && !inVehicle && stepTimes.size >= 4
-        fitToDrive.processSample(t, s, walking = context == "WALKING" || stepping, hasGyro = resampler.hasGyroData,
-            inPocket = !proximityAvailable || proximityNear || !screenOn, inVehicle = inVehicle)
+        // Steady stepping (≥ 4 steps in 3 s) also counts as walking: the activity model learned normal
+        // walking and may call an unsteady walk something else, which is exactly the walk to check.
+        // Running is never a walk; stairs only count during the set-up walk and "Check my walk".
+        val guided = fitToDrive.walkSessionActive || fitToDrive.checkRunning
+        val stepping = !inVehicle && stepTimes.size >= (if (guided) 3 else 4) && context != "RUNNING" &&
+            (guided || (context != "STAIRS_UP" && context != "STAIRS_DOWN"))
+        val modelWalking = context == "WALKING"
+        fitToDrive.processSample(t, s, walking = modelWalking || stepping, hasGyro = resampler.hasGyroData,
+            inPocket = !proximityAvailable || proximityNear || !screenOn, inVehicle = inVehicle,
+            stepsOnly = !modelWalking && stepping)
 
         samplesSinceInference++
         val stride = if (ecoMode) config.ecoStrideSamples else config.liveStrideSamples

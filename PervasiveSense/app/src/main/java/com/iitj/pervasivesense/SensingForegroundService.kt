@@ -395,6 +395,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 WalkSessionStage.RECORDING -> R.string.fit_say_walk_recording
                 WalkSessionStage.HALFWAY -> R.string.fit_say_walk_half
                 WalkSessionStage.DONE -> R.string.fit_say_walk_done
+                WalkSessionStage.MORE_NEEDED -> R.string.fit_say_walk_more
                 WalkSessionStage.NOTHING_YET -> R.string.fit_say_walk_not_yet
                 WalkSessionStage.TIMED_OUT -> R.string.fit_say_walk_timeout
             }), interrupt = false)

@@ -793,13 +793,61 @@ class FitToDriveMonitorTest {
         val m = monitor() // 15 segments (1 min) needed
         assertTrue(m.startWalkRecording(start))
         assertTrue(m.report().walkSession)
+        assertEquals(120f, m.report(start).walkSessionSecondsLeft, 0.1f)
         var t = feed(m, session1, start)
         t = feed(m, session2, t + 1_000_000_000L)
+        // A plain 2-minute timer: it goes on until the end even though enough is learned.
+        assertTrue(m.report().walkSession)
+        t = feed(m, Recording.constant(70.0, 0f, 0f, 9.81f), t, walking = false)
         val stages = events.filterIsInstance<FitToDriveEvent.WalkSession>().map { it.stage }
         assertEquals(listOf(WalkSessionStage.RECORDING, WalkSessionStage.HALFWAY, WalkSessionStage.DONE), stages)
         assertEquals(BaselineStatus.PROVISIONAL, m.report().baselineStatus)
         assertFalse(m.report().walkSession)
         assertFalse(m.startWalkRecording(t)) // already learned
+    }
+
+    @Test
+    fun aGuidedWalkWithTooLittleWalkingAsksForOneMoreMinute() {
+        val m = monitor()
+        assertTrue(m.startWalkRecording(start))
+        var t = feed(m, session1, start) // 30 s: not enough
+        t = feed(m, Recording.constant(95.0, 0f, 0f, 9.81f), t, walking = false)
+        assertEquals(WalkSessionStage.MORE_NEEDED, events.filterIsInstance<FitToDriveEvent.WalkSession>().last().stage)
+        assertTrue(m.report().walkSession)
+        t = feed(m, session2, t)
+        feed(m, Recording.constant(40.0, 0f, 0f, 9.81f), t, walking = false)
+        assertEquals(WalkSessionStage.DONE, events.filterIsInstance<FitToDriveEvent.WalkSession>().last().stage)
+        assertEquals(BaselineStatus.PROVISIONAL, m.report().baselineStatus)
+    }
+
+    @Test
+    fun aWalkSeenOnlyFromStepsIsScoredButNeverLearned() {
+        val m = monitor()
+        var t = learnNormal(m)
+        // The activity model did not call the unsteady walk WALKING; the steps did.
+        m.requestCheck(t)
+        t = endCheck(m, feedSteps(m, session3.impaired(1.0), t + 1_000_000_000L))
+        assertEquals(WalkLevel.LARGE_GAP, checks().last().level)
+        // Everyday walking seen only from steps (no warning active) is never learned as normal either.
+        val m2 = monitor()
+        var t2 = learnNormal(m2)
+        val learned = m2.report().baselineSegments
+        t2 = feedSteps(m2, session1, t2 + sixMinutes)
+        feed(m2, Recording.constant(400.0, 0f, 0f, 9.81f), t2, walking = false)
+        assertEquals(learned, m2.report().baselineSegments)
+        // ...while the same walk seen as WALKING is.
+        t2 = feed(m2, session1, t2 + 401_000_000_000L)
+        feed(m2, Recording.constant(400.0, 0f, 0f, 9.81f), t2, walking = false)
+        assertTrue(m2.report().baselineSegments > learned)
+    }
+
+    private fun feedSteps(m: FitToDriveMonitor, rec: Recording, t0: Long): Long {
+        val s = FloatArray(6)
+        for (i in 0 until rec.size) {
+            rec.data[i].copyInto(s)
+            m.processSample(t0 + rec.t[i], s, walking = true, hasGyro = true, stepsOnly = true)
+        }
+        return t0 + rec.t[rec.size - 1]
     }
 
     @Test
@@ -948,7 +996,7 @@ class FitToDriveEngineTest {
 
     @Test
     fun theGuidedWalkAlsoCountsStepsWhenTheActivityModelMissesTheWalk() {
-        fun measured(guided: Boolean): Int {
+        fun measured(guided: Boolean): Pair<Int, Int> {
             val fit = ArrayList<FitToDriveEvent>()
             val e = SensingEngine(AlwaysStill(), wallClockOf = { it / 1_000_000 }, dayKeyOf = { "2026-10-23" },
                 listener = object : SensingEngine.Listener {
@@ -961,9 +1009,13 @@ class FitToDriveEngineTest {
                 if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
                 if (k == 10 && guided) assertTrue(e.startWalkRecording())
             }
-            return fit.count { it is FitToDriveEvent.SegmentMeasured }
+            return fit.count { it is FitToDriveEvent.SegmentMeasured } to e.fitToDrive.report().baselineSegments
         }
-        assertEquals(0, measured(guided = false))
-        assertTrue(measured(guided = true) >= 8)
+        // Not guided: the steps make the walk measurable (a check can score it) but it is never learned.
+        val (seen, learned) = measured(guided = false)
+        assertTrue(seen >= 8)
+        assertEquals(0, learned)
+        // Guided set-up walk: learned.
+        assertTrue(measured(guided = true).second >= 8)
     }
 }
