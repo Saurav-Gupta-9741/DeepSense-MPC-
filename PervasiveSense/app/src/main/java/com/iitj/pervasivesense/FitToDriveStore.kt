@@ -51,6 +51,8 @@ object FitToDriveStore {
         for (e in s.baseline) {
             val row = JSONArray().put(e.wallMillis).put(e.dayKey)
             e.values.forEach { row.put(num(it)) }
+            row.put(e.position.name)
+            e.signature?.forEach { row.put(num(it)) }
             baseline.put(row)
         }
         val balance = JSONArray()
@@ -76,7 +78,12 @@ object FitToDriveStore {
         val b = o.getJSONArray("baseline")
         val baseline = (0 until b.length()).map { i ->
             val row = b.getJSONArray(i)
-            BaselineEntry(row.getLong(0), row.getString(1), FloatArray(GaitFeature.COUNT) { k -> flt(row, 2 + k) })
+            val n = 2 + GaitFeature.COUNT
+            // Older data has no position (it was all pocket walking) and no signature.
+            val pos = if (row.length() > n) CarryPosition.entries.firstOrNull { it.name == row.optString(n) } ?: CarryPosition.POCKET
+                else CarryPosition.POCKET
+            val sig = if (row.length() >= n + 1 + GaitSegment.SIGNATURE_SIZE) FloatArray(GaitSegment.SIGNATURE_SIZE) { k -> flt(row, n + 1 + k) } else null
+            BaselineEntry(row.getLong(0), row.getString(1), FloatArray(GaitFeature.COUNT) { k -> flt(row, 2 + k) }, pos, sig)
         }
         val r = o.getJSONArray("balance")
         val refs = (0 until r.length()).map { i ->

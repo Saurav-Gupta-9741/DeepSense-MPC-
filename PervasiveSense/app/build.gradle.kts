@@ -11,8 +11,8 @@ android {
         applicationId = "com.iitj.pervasivesense"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "2.9"
+        versionCode = 12
+        versionName = "3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

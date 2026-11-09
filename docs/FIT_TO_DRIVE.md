@@ -279,3 +279,36 @@ Safety: a spotter walks alongside, sessions use a flat, closed route, and nobody
 | `StudyLog.kt` | Labelled study sessions: CSV log and export |
 | `FitToDriveActivity.kt` | Opt-in, progress, last check, balance test, response |
 | `SensingEngine.kt` / `SensingForegroundService.kt` | Feeds every 50 Hz sample; trip-start and car-Bluetooth triggers; alert notification |
+
+## Carrying the phone anywhere on the body (v3.0)
+
+The walk is no longer limited to the trouser pocket. The user records their normal walk once
+for each way they carry the phone (one tap: **trouser pocket**, **in the hand**, **elsewhere on
+the body**: jacket, shirt, belt, bag), about 1 minute of walking each. Each way has its own
+learned walk, and every check is compared with the matching one:
+
+- *In the hand*: screen on and the proximity sensor uncovered (held and looked at).
+- Otherwise the nearest of the user's own recorded positions by a 3-number, orientation-free
+  signature of how the phone moves on the body (gyroscope RMS, |a| RMS, horizontal/vertical
+  dynamic acceleration). On Shoaib et al. 2014 (10 people, 5 phones worn at once) this
+  recognises the position 97.9 % of the time.
+- Everyday walking is learned into a position only if it moves like it, and an 8 s segment
+  during which the phone was picked up or put away is never learned.
+- A walk carried in a way never recorded (e.g. an armband) is flagged as *unfamiliar*: a big
+  gap then only offers the balance check (no warning), and the app asks to record that way.
+
+**Accuracy per position** (`FitToDrivePositionsTest.accuracyPerPositionOnTenPeople`, CI):
+each person records left pocket, wrist (hand swinging) and belt from 60 % of their walk; the
+other 40 % is checked sober and with simulated impairment (x1.0).
+
+| Phone | Position matched | Sober walk flagged "very different" | Impaired walk caught |
+|---|---|---|---|
+| Left trouser pocket | 10/10 | 0/10 | 10/10 |
+| Right pocket (not recorded, matched to left) | 9/10 | 0/10 | 10/10 |
+| Wrist / hand | 10/10 | 0/10 | 10/10 |
+| Belt | 10/10 | 0/10 | 10/10 |
+| Upper arm (never recorded) | unfamiliar 9/10 | 1/10 | 10/10 (balance check offered) |
+
+Limits: impairment is simulated; held-in-hand-and-looked-at walking is not in the dataset (it
+is detected from the screen and proximity sensor, not from motion); a bag swinging from the
+shoulder is not attached to the body and is less reliable.

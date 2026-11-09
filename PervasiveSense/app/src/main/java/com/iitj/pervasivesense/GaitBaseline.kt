@@ -6,8 +6,25 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
-/** A learned segment of the user's own everyday walking. */
-class BaselineEntry(val wallMillis: Long, val dayKey: String, val values: FloatArray)
+/** Where the phone is carried while walking. Each has its own learned walk. */
+enum class CarryPosition { POCKET, HAND, BODY }
+
+/** A learned segment of the user's own everyday walking (old data, before positions: pocket). */
+class BaselineEntry(
+    val wallMillis: Long,
+    val dayKey: String,
+    val values: FloatArray,
+    val position: CarryPosition = CarryPosition.POCKET,
+    /** [GaitSegment.signature]; null for data learned before positions existed. */
+    val signature: FloatArray? = null
+)
+
+/** Distance between two position signatures (dimensions missing in either are skipped). */
+fun signatureDistance(a: FloatArray, b: FloatArray): Float {
+    var s = 0.0; var n = 0
+    for (k in a.indices) if (!a[k].isNaN() && !b[k].isNaN()) { val d = a[k] - b[k]; s += d * d; n++ }
+    return if (n == 0) Float.NaN else sqrt(s).toFloat()
+}
 
 /** How far one segment is from the user's normal walk. */
 class GaitDeviation(
@@ -81,7 +98,19 @@ class GaitBaseline(
         return true
     }
 
-    fun clear() { entries.clear(); stats = null; dayCount = -1 }
+    fun clear() { entries.clear(); stats = null; dayCount = -1; centroidCache = null }
+
+    private var centroidCache: Pair<Int, FloatArray?>? = null
+
+    /** Mean position signature of the learned entries; null if none has one. */
+    fun centroid(): FloatArray? {
+        centroidCache?.let { if (it.first == entries.size) return it.second }
+        val sum = DoubleArray(GaitSegment.SIGNATURE_SIZE); val cnt = IntArray(GaitSegment.SIGNATURE_SIZE)
+        for (e in entries) e.signature?.forEachIndexed { k, v -> if (!v.isNaN()) { sum[k] = sum[k] + v; cnt[k]++ } }
+        val c = if (cnt.all { it == 0 }) null else FloatArray(sum.size) { k -> if (cnt[k] == 0) Float.NaN else (sum[k] / cnt[k]).toFloat() }
+        centroidCache = entries.size to c
+        return c
+    }
 
     fun restore(list: List<BaselineEntry>) {
         entries.clear(); list.takeLast(capacity).forEach { entries.addLast(it) }; stats = null; dayCount = -1

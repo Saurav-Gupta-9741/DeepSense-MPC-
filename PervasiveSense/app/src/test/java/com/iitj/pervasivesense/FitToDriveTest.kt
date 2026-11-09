@@ -485,13 +485,15 @@ class FitToDriveMonitorTest {
     }
 
     @Test
-    fun walksWithThePhoneInTheHandAreNotLearnedOrScored() {
+    fun walksWithThePhoneInTheHandAreLearnedAsTheHandNeverAsThePocket() {
         val m = monitor()
         val t = feed(m, session2, start, inPocket = false)
         assertTrue(m.report().walkingOutsidePocket)
         feed(m, Recording.constant(1.0, 0f, 0f, 9.81f), t + sixMinutes, walking = false)
-        assertEquals(0, m.report().baselineSegments)
-        assertTrue(events.none { it is FitToDriveEvent.SegmentMeasured })
+        val learned = m.exportState().baseline
+        assertTrue(learned.isNotEmpty())
+        assertTrue(learned.all { it.position == CarryPosition.HAND })
+        assertEquals(BaselineStatus.LEARNING, m.statusOf(CarryPosition.POCKET))
         assertFalse(m.report().walkingOutsidePocket)
     }
 
@@ -943,7 +945,7 @@ class FitToDriveMonitorTest {
         m.processSample(start, s, walking = true, hasGyro = true, inPocket = true)
         assertTrue(m.report().recordingWalk)
         m.processSample(start + 20_000_000L, s, walking = true, hasGyro = true, inPocket = false)
-        assertFalse(m.report().recordingWalk)
+        assertTrue(m.report().recordingWalk) // in the hand: recorded too (as the hand)
         m.processSample(start + 40_000_000L, s, walking = false, hasGyro = true, inPocket = true)
         assertFalse(m.report().recordingWalk)
     }
@@ -1040,12 +1042,15 @@ class FitToDriveEngineTest {
         e.onProximity(true)  // a working sensor reads "covered" at some point...
         e.onProximity(false) // ...uncovered: in the hand
         for (ev in deviceEvents(session2, startNanos = 1_000_000_000L)) if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
-        assertTrue(fit.none { it is FitToDriveEvent.SegmentMeasured })
         assertTrue(snaps.last().fitToDrive.walkingOutsidePocket)
+        // Held and looked at: learned as "in the hand", never as the pocket.
+        assertTrue(e.fitToDrive.exportState().baseline.isNotEmpty())
+        assertTrue(e.fitToDrive.exportState().baseline.all { it.position == CarryPosition.HAND })
         e.onProximity(true) // covered: in the pocket
         for (ev in deviceEvents(session2, startNanos = 100_000_000_000L)) if (ev.isAccel) e.onAccelerometer(ev.t, ev.x, ev.y, ev.z) else e.onGyroscope(ev.t, ev.x, ev.y, ev.z)
         assertTrue(fit.count { it is FitToDriveEvent.SegmentMeasured } >= 10)
         assertFalse(snaps.last().fitToDrive.walkingOutsidePocket)
+        assertTrue(e.fitToDrive.exportState().baseline.any { it.position == CarryPosition.POCKET })
     }
 
     @Test

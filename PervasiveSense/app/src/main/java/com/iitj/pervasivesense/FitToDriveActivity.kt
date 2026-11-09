@@ -120,14 +120,13 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnTestAlert.setOnClickListener { SensingRepository.sendTestAlert() }
         binding.btnAlertCancel.setOnClickListener { SensingRepository.cancelContactAlert() }
         binding.btnStep1.setOnClickListener {
-            if (lastReport?.walkSession == true) {
-                SensingRepository.stopWalkRecording()
-                voice?.stop()
-            } else {
-                SensingRepository.startWalkRecording()
-                say(getString(R.string.fit_say_walk_start))
-            }
+            if (lastReport?.walkSession == true) stopRecording() else recordWalk(CarryPosition.POCKET)
         }
+        binding.btnStep1Hand.setOnClickListener { recordWalk(CarryPosition.HAND) }
+        binding.btnStep1Body.setOnClickListener { recordWalk(CarryPosition.BODY) }
+        binding.btnAddPocket.setOnClickListener { recordWalk(CarryPosition.POCKET) }
+        binding.btnAddHand.setOnClickListener { recordWalk(CarryPosition.HAND) }
+        binding.btnAddBody.setOnClickListener { recordWalk(CarryPosition.BODY) }
         binding.btnStep3Skip.setOnClickListener {
             FitToDriveStore.setContactSkipped(this, true)
             render(SensingRepository.status.value, SensingRepository.snapshot.value, SensingRepository.message.value)
@@ -136,6 +135,7 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnRecordAgain.setOnClickListener { startBalance(BalancePurpose.REFERENCE) }
         binding.btnStep3.setOnClickListener { focusContact() }
         binding.btnCheckNow.setOnClickListener {
+            if (lastReport?.walkSession == true) { stopRecording(); return@setOnClickListener }
             SensingRepository.requestFitCheck()
             say(getString(R.string.fit_say_check_start))
         }
@@ -330,6 +330,27 @@ class FitToDriveActivity : AppCompatActivity() {
         render(SensingRepository.status.value, SensingRepository.snapshot.value, SensingRepository.message.value)
     }
 
+    /** Records the normal walk for one way of carrying the phone (1 min of walking). */
+    private fun recordWalk(p: CarryPosition) {
+        SensingRepository.startWalkRecording(p)
+        say(getString(when (p) {
+            CarryPosition.POCKET -> R.string.fit_say_pos_pocket
+            CarryPosition.HAND -> R.string.fit_say_pos_hand
+            CarryPosition.BODY -> R.string.fit_say_pos_body
+        }))
+    }
+
+    private fun stopRecording() {
+        SensingRepository.stopWalkRecording()
+        voice?.stop()
+    }
+
+    private fun positionName(p: CarryPosition) = getString(when (p) {
+        CarryPosition.POCKET -> R.string.fit_pos_pocket
+        CarryPosition.HAND -> R.string.fit_pos_hand
+        CarryPosition.BODY -> R.string.fit_pos_body
+    })
+
     private fun showSettings(show: Boolean) = with(binding) {
         val v = if (show) View.VISIBLE else View.GONE
         cardSettings.visibility = v; cardStudy.visibility = v; cardLimits.visibility = v
@@ -380,6 +401,7 @@ class FitToDriveActivity : AppCompatActivity() {
     private fun issueText(f: FitToDriveReport) = getString(when (f.recordingIssue) {
         RecordingIssue.NONE -> if (f.recordingWalk) R.string.fit_rec_ok else R.string.fit_step1_waiting
         RecordingIssue.NOT_IN_POCKET -> R.string.fit_rec_not_pocket
+        RecordingIssue.NOT_WHERE_CHOSEN -> R.string.fit_rec_not_where
         RecordingIssue.NOT_WALKING -> R.string.fit_rec_not_walking
         RecordingIssue.NOT_STEADY -> R.string.fit_rec_not_steady
         RecordingIssue.LEARNING_PAUSED -> R.string.fit_rec_paused
@@ -495,7 +517,8 @@ class FitToDriveActivity : AppCompatActivity() {
         // What is recorded, in plain numbers, and why not when it is not.
         tvStep1Detail.text = when {
             walkDone -> getString(R.string.fit_step1_done)
-            f.walkSession -> issueText(f) + "\n" + getString(R.string.fit_step1_recording,
+            f.walkSession -> getString(R.string.fit_pos_recording, positionName(f.sessionPosition ?: CarryPosition.POCKET)) + "\n" +
+                issueText(f) + "\n" + getString(R.string.fit_step1_recording,
                 clock(f.walkRecordedSec), clock(f.walkRecordedNeededSec), f.guidedSteps)
             // The last walk gave up: say why, then how.
             f.recordingIssue != RecordingIssue.NONE -> getString(R.string.fit_step1_failed, issueText(f)) + "\n" + getString(R.string.fit_step1_how)
@@ -504,8 +527,11 @@ class FitToDriveActivity : AppCompatActivity() {
         progressStep1.visibility = if (f.walkSession) View.VISIBLE else View.GONE
         progressStep1.progress = pct(f.walkRecordedSec / f.walkRecordedNeededSec)
         btnStep1.visibility = if (walkDone) View.GONE else View.VISIBLE
-        btnStep1.setText(if (f.walkSession) R.string.fit_step1_stop else R.string.fit_step1_start)
+        btnStep1.setText(if (f.walkSession) R.string.fit_step1_stop else R.string.fit_pos_pocket_start)
         btnStep1.isEnabled = canAct
+        val choose = if (!walkDone && !f.walkSession) View.VISIBLE else View.GONE
+        btnStep1Hand.visibility = choose; btnStep1Body.visibility = choose
+        btnStep1Hand.isEnabled = canAct; btnStep1Body.isEnabled = canAct
 
         // Step 2: standing balance, after the walk.
         val step2Active = walkDone && !balanceDone
@@ -650,7 +676,14 @@ class FitToDriveActivity : AppCompatActivity() {
         cardCheck.visibility = if (ready) View.VISIBLE else View.GONE
         if (!ready) return@with
         val checking = f.checkSecondsLeft > 0f
-        btnCheckNow.isEnabled = canAct && !f.waitingForWalk
+        val adding = f.walkSession // recording another way of carrying, after set-up
+        btnCheckNow.isEnabled = canAct && (adding || !f.waitingForWalk)
+        btnCheckNow.setText(if (adding) R.string.fit_stop_recording else R.string.fit_check_now)
+        rowAddPosition.visibility = if (checking || adding) View.GONE else View.VISIBLE
+        btnAddPocket.visibility = if (CarryPosition.POCKET in f.learnedPositions) View.GONE else View.VISIBLE
+        btnAddHand.visibility = if (CarryPosition.HAND in f.learnedPositions) View.GONE else View.VISIBLE
+        btnAddBody.visibility = if (CarryPosition.BODY in f.learnedPositions) View.GONE else View.VISIBLE
+        listOf(btnAddPocket, btnAddHand, btnAddBody).forEach { it.isEnabled = canAct }
         // The balance check is offered by the advice card, only when the walk was different.
         btnBalanceCheck.visibility = View.GONE
 
@@ -661,6 +694,7 @@ class FitToDriveActivity : AppCompatActivity() {
                 getString(when (c.notScored) {
                     NotScoredReason.STILL_LEARNING -> R.string.fit_not_scored_learning
                     NotScoredReason.TOO_IRREGULAR -> R.string.fit_not_scored_irregular
+                    NotScoredReason.POSITION_NOT_LEARNED -> R.string.fit_not_scored_position
                     else -> R.string.fit_not_scored_no_walk
                 }),
                 "", if (c.notScored == NotScoredReason.TOO_IRREGULAR) R.color.accent_rose else R.color.text_muted)
@@ -671,6 +705,8 @@ class FitToDriveActivity : AppCompatActivity() {
                     WalkLevel.LARGE_GAP -> R.string.fit_level_large to R.color.accent_rose
                 }
                 var d = getString(R.string.fit_percentile, pct(c.percentile))
+                c.position?.let { d = getString(R.string.fit_pos_compared, positionName(it)) + "\n" + d }
+                if (c.unfamiliarPosition) d = getString(R.string.fit_pos_unfamiliar) + "\n" + d
                 if (c.provisional) d += getString(R.string.fit_provisional)
                 if (c.topDeviations.isNotEmpty()) {
                     d += "\n" + getString(R.string.fit_top, c.topDeviations.joinToString(", ") { it.first.label })
@@ -678,11 +714,25 @@ class FitToDriveActivity : AppCompatActivity() {
                 Triple(getString(label), d, col)
             }
         }
+        if (adding) {
+            tvLastLevel.text = getString(R.string.fit_pos_recording, positionName(f.sessionPosition ?: CarryPosition.POCKET))
+            tvLastLevel.setTextColor(color(R.color.text_main))
+            levelDot.backgroundTintList = ColorStateList.valueOf(color(R.color.primary_glow))
+            tvLastDetail.text = issueText(f) + "\n" + getString(R.string.fit_step1_recording,
+                clock(f.walkRecordedSec), clock(f.walkRecordedNeededSec), f.guidedSteps)
+            tvLastDetail.visibility = View.VISIBLE
+            tvLastMeta.visibility = View.GONE
+            tvLastBalance.visibility = View.GONE
+            tvLearned.visibility = View.GONE
+            return@with
+        }
         if (checking) {
             tvLastLevel.text = getString(R.string.fit_checking, kotlin.math.ceil(f.checkSecondsLeft).toInt())
             tvLastLevel.setTextColor(color(R.color.text_main))
             levelDot.backgroundTintList = ColorStateList.valueOf(color(R.color.primary_glow))
-            tvLastDetail.text = issueText(f) + "\n" + getString(R.string.fit_check_recorded, clock(f.walkRecordedSec), f.guidedSteps)
+            tvLastDetail.text = issueText(f) + "\n" +
+                (f.currentPosition?.let { getString(R.string.fit_pos_now, positionName(it)) + "  ·  " } ?: "") +
+                getString(R.string.fit_check_recorded, clock(f.walkRecordedSec), f.guidedSteps)
             tvLastDetail.visibility = View.VISIBLE
             tvLastMeta.visibility = View.GONE
             tvLastBalance.visibility = View.GONE
@@ -729,8 +779,9 @@ class FitToDriveActivity : AppCompatActivity() {
 
         val status = if (f.baselineStatus == BaselineStatus.ESTABLISHED) getString(R.string.fit_status_established)
             else getString(R.string.fit_status_provisional, f.daysForEstablished)
-        tvLearned.text = resources.getQuantityString(R.plurals.fit_learned, f.baselineDays, f.baselineWalkMinutes, f.baselineDays) +
-            ". " + status
+        val learned = CarryPosition.entries.filter { it in f.learnedPositions }.joinToString(" · ") { "✓ " + positionName(it) }
+        tvLearned.text = getString(R.string.fit_pos_learned, learned) + ". " + status +
+            (if (f.learnedPositions.size < CarryPosition.entries.size) "\n" + getString(R.string.fit_pos_add_hint) else "")
     }
 
     /**

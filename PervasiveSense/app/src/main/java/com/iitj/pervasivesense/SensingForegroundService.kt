@@ -394,6 +394,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             is FitToDriveEvent.RecordingIssueChanged -> speak(getString(when (event.issue) {
                 RecordingIssue.NONE -> R.string.fit_say_rec_again
                 RecordingIssue.NOT_IN_POCKET -> R.string.fit_say_rec_not_pocket
+                RecordingIssue.NOT_WHERE_CHOSEN -> R.string.fit_say_rec_not_where
                 RecordingIssue.NOT_WALKING -> R.string.fit_say_rec_not_walking
                 RecordingIssue.NOT_STEADY -> R.string.fit_say_rec_not_steady
                 RecordingIssue.LEARNING_PAUSED -> R.string.fit_say_rec_paused
@@ -428,6 +429,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             null -> when (c.notScored) {
                 NotScoredReason.NO_RECENT_WALK -> R.string.fit_say_walk_none
                 NotScoredReason.TOO_IRREGULAR -> R.string.fit_say_walk_irregular
+                NotScoredReason.POSITION_NOT_LEARNED -> R.string.fit_say_walk_position
                 else -> return
             }
         }
@@ -581,7 +583,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     override fun requestFitCheck() { handler.post { engine?.requestFitCheck() } }
 
     override fun cancelContactAlert() { handler.post { contactAlert?.cancel(asPassenger = true) } }
-    override fun startWalkRecording() { handler.post { engine?.startWalkRecording() } }
+    override fun startWalkRecording(position: CarryPosition) { handler.post { engine?.startWalkRecording(position) } }
     override fun stopWalkRecording() { handler.post { engine?.stopWalkRecording() } }
 
     override fun sendTestAlert() {

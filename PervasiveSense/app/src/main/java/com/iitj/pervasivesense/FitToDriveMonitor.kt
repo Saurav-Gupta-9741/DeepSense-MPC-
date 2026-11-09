@@ -7,6 +7,8 @@ enum class WalkLevel { NORMAL, UNUSUAL, LARGE_GAP }
 enum class CheckTrigger { TRIP_START, CAR_BLUETOOTH, MANUAL }
 enum class NotScoredReason {
     NO_RECENT_WALK, STILL_LEARNING,
+    /** Walking with the phone held in the hand, but no walk was recorded that way yet. */
+    POSITION_NOT_LEARNED,
     /** Steps were counted, but the walk was too irregular to measure: treated as a warning (balance check). */
     TOO_IRREGULAR
 }
@@ -24,7 +26,14 @@ enum class BalanceStart { STARTED, REFUSED_WARNING, REFUSED_IN_VEHICLE }
 enum class WalkSessionStage { RECORDING, HALFWAY, DONE, TIMED_OUT }
 
 /** Why the walk is not being recorded right now (set-up walk and Check my walk); NONE = recording. */
-enum class RecordingIssue { NONE, NOT_IN_POCKET, NOT_WALKING, NOT_STEADY, LEARNING_PAUSED, STUDY_MODE }
+enum class RecordingIssue {
+    NONE,
+    /** Recording "in the pocket" but the phone is held with the screen on. */
+    NOT_IN_POCKET,
+    /** Recording "elsewhere on the body" but the phone is held with the screen on. */
+    NOT_WHERE_CHOSEN,
+    NOT_WALKING, NOT_STEADY, LEARNING_PAUSED, STUDY_MODE
+}
 
 /** "Test it": a practice walk the user does on purpose. It is scored like a real check but never learned. */
 enum class PracticeWalk { NORMAL, WOBBLY }
@@ -47,7 +56,11 @@ class WalkCheck(
     /** Features furthest from normal, largest first (z in the impairment direction). */
     val topDeviations: List<Pair<GaitFeature, Float>>,
     /** Set for a "Test it" practice walk. */
-    val practice: PracticeWalk? = null
+    val practice: PracticeWalk? = null,
+    /** Where the phone was: the walk is compared with the walk learned there. */
+    val position: CarryPosition? = null,
+    /** The phone moved unlike any recorded position: the result is less certain (record this way once). */
+    val unfamiliarPosition: Boolean = false
 )
 
 class BalanceResult(
@@ -81,6 +94,12 @@ data class FitToDriveReport(
     val recordingWalk: Boolean,
     /** The guided set-up walk ("Start walk recording") is running. */
     val walkSession: Boolean,
+    /** Positions with a learned walk (checks work there). */
+    val learnedPositions: Set<CarryPosition>,
+    /** The set-up walk is recording this position (null: none running). */
+    val sessionPosition: CarryPosition?,
+    /** Where the phone seems to be, from the last walking segment while recording or checking. */
+    val currentPosition: CarryPosition?,
     /** Set-up walk / Check my walk: seconds of walking recorded so far (what the screen shows). */
     val walkRecordedSec: Float,
     /** Set-up walk: seconds of walking needed. */
@@ -207,6 +226,10 @@ class FitToDriveMonitor(
         val walkSessionSec: Float = 300f,
         /** ...and says "nothing recorded yet" if no walking was recorded this long after the start. */
         val walkSessionNudgeSec: Float = 30f,
+        /** Everyday walking is learned into a position only if it moves like it (signature distance; own p90 on Shoaib 0.27). */
+        val positionLearnMaxDist: Float = 0.3f,
+        /** A walk further than this from every recorded position (own p95 0.36 on Shoaib) is "unfamiliar". */
+        val positionUnfamiliarDist: Float = 0.36f,
         /** Car Bluetooth counts as driving only if a trip starts within this time (earbuds never do). */
         val carBluetoothTripSec: Float = 600f,
         /** A balance check this much steadier than the user's own recordings is not valid. */
@@ -214,12 +237,24 @@ class FitToDriveMonitor(
     )
 
     private val extractor = GaitSegmentExtractor()
-    private val baseline = GaitBaseline(maxPerDay = config.maxPerDay)
+    /** One learned walk per carrying position. */
+    private val baselines = CarryPosition.entries.associateWith { GaitBaseline(maxPerDay = config.maxPerDay) }
+    /** The position whose learned walk is being used (set for every segment, walk or check). */
+    private var current = CarryPosition.POCKET
+    private val baseline get() = baselines.getValue(current)
+    private var sessionPosition: CarryPosition? = null
+    private var lastSegmentPosition: CarryPosition? = null
+    private var stableViewing = false
+    private var viewingCandidate = false
+    private var viewingCandidateT = Long.MIN_VALUE
+    /** When the phone was last picked up / put away: a segment spanning it mixes two positions. */
+    private var viewingChangedT = Long.MIN_VALUE
     /**
      * A segment of the last [Config.lookbackSec]; [learned] if it already went into the baseline (setup);
      * not [learnable] if it was recorded while learning was blocked (warning, study session, practice walk).
      */
-    private class Recent(val seg: GaitSegment, val wall: Long, val learned: Boolean, val learnable: Boolean) {
+    private class Recent(val seg: GaitSegment, val wall: Long, val learned: Boolean, val learnable: Boolean,
+                         val pos: CarryPosition, val posDist: Float) {
         /** Unchecked walk judged on leaving the window: normal or not (shared by the whole ≈ 1 min judged). */
         var verdict: Boolean? = null
     }
@@ -301,10 +336,40 @@ class FitToDriveMonitor(
         if (!on) { advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cancelBalanceTest(); stopWalkRecording() }
     }
 
-    fun status(): BaselineStatus = when {
-        baseline.size < config.segmentsForProvisional -> BaselineStatus.LEARNING
-        baseline.size >= config.segmentsForEstablished && baseline.days >= config.daysForEstablished -> BaselineStatus.ESTABLISHED
-        else -> BaselineStatus.PROVISIONAL
+    /** Status of the learned walk in use ([current] position). */
+    fun status(): BaselineStatus = statusOf(current)
+
+    fun statusOf(p: CarryPosition): BaselineStatus {
+        val b = baselines.getValue(p)
+        return when {
+            b.size < config.segmentsForProvisional -> BaselineStatus.LEARNING
+            b.size >= config.segmentsForEstablished && b.days >= config.daysForEstablished -> BaselineStatus.ESTABLISHED
+            else -> BaselineStatus.PROVISIONAL
+        }
+    }
+
+    private fun learnedPositions() = CarryPosition.entries.filter { statusOf(it) != BaselineStatus.LEARNING }
+
+    /** Overall: the best learned position (LEARNING while none can be checked yet). */
+    fun overallStatus(): BaselineStatus = CarryPosition.entries.map { statusOf(it) }.maxByOrNull { it.ordinal } ?: BaselineStatus.LEARNING
+
+    /**
+     * Where a walking segment was carried, and how far it moves from that position's recordings.
+     * Set-up walk: the position the user chose. Screen on and uncovered: in the hand. Otherwise the
+     * nearest of the user's own recorded positions by [GaitSegment.signature] (97.9 % right on 10
+     * people x 4 positions); before anything is recorded, everyday walks count as the pocket (as before).
+     */
+    private fun positionOf(seg: GaitSegment, viewing: Boolean): Pair<CarryPosition, Float> {
+        sessionPosition?.let { p -> return p to (baselines.getValue(p).centroid()?.let { signatureDistance(seg.signature, it) } ?: Float.NaN) }
+        if (viewing) return CarryPosition.HAND to (baselines.getValue(CarryPosition.HAND).centroid()?.let { signatureDistance(seg.signature, it) } ?: Float.NaN)
+        val learned = learnedPositions()
+        if (learned.isEmpty()) return CarryPosition.POCKET to Float.NaN
+        var best = learned.first(); var bestD = Float.NaN
+        for (p in learned) {
+            val d = baselines.getValue(p).centroid()?.let { signatureDistance(seg.signature, it) } ?: Float.NaN
+            if (!d.isNaN() && (bestD.isNaN() || d < bestD)) { best = p; bestD = d }
+        }
+        return best to bestD
     }
 
     /** Sensor data is missing: never build a segment across the hole. */
@@ -332,6 +397,9 @@ class FitToDriveMonitor(
         inPocketNow = inPocket
         outsidePocketSince = if (walking && !inPocket) (if (outsidePocketSince == Long.MIN_VALUE) t else outsidePocketSince) else Long.MIN_VALUE
         if (walkSessionActive || onRequest) guidedClock(t, walking, steps)
+        // Held and looked at, or not: only a change lasting 2 s counts (the pocket sensor flickers).
+        if (!inPocket != viewingCandidate) { viewingCandidate = !inPocket; viewingCandidateT = t }
+        if (viewingCandidate != stableViewing && t - viewingCandidateT >= secs(2f)) { stableViewing = viewingCandidate; viewingChangedT = t }
         if (onRequest && t >= waitUntil) {
             waitUntil = Long.MIN_VALUE
             if (!evaluate(t, CheckTrigger.MANUAL)) {
@@ -359,13 +427,25 @@ class FitToDriveMonitor(
             publishCheck(notScoredCheck(t, CheckTrigger.MANUAL, NotScoredReason.NO_RECENT_WALK, p))
         }
         if (recent.isNotEmpty() && t - recent.first().seg.tEndNanos > secs(config.lookbackSec)) pruneRecent(t)
-        val seg = extractor.processSample(t, s, walking && inPocket, hasGyro) ?: return
+        // Any carrying position is recorded; where the phone is decides which learned walk is used.
+        val seg = extractor.processSample(t, s, walking, hasGyro) ?: return
         val wall = wallClockOf(t)
+        val viewing = stableViewing
+        val (pos, posDist) = positionOf(seg, viewing)
+        current = pos
+        lastSegmentPosition = pos
+        // Set-up walk "in the pocket" / "elsewhere on the body" while the phone is held and looked at: not that position.
+        val wrongPlace = sessionPosition != null && sessionPosition != CarryPosition.HAND && viewing
+        // Everyday walking is learned into a position only if it moves like it (never mixes two ways of carrying).
+        val fits = sessionPosition != null || statusOf(pos) == BaselineStatus.LEARNING ||
+            posDist.isNaN() || posDist <= config.positionLearnMaxDist
         // Setup: nothing can be checked yet, so there is no walk to protect; learn at once.
         // Walking seen only from steps (an unsteady walk the activity model did not call WALKING)
         // is scored, but learned as normal only during the guided set-up walk.
         val stepsOnlySeg = stepsOnlyT != Long.MIN_VALUE && t - stepsOnlyT < secs(10f)
-        val learnable = !learningBlocked && (!stepsOnlySeg || walkSessionActive)
+        // Picked up or put away within this 8 s segment: two ways of carrying mixed, never learned.
+        val mixed = viewingChangedT != Long.MIN_VALUE && t - viewingChangedT < secs(extractor.segmentSamples / 50f)
+        val learnable = !learningBlocked && (!stepsOnlySeg || walkSessionActive) && !wrongPlace && fits && !mixed
         val learnedNow = status() == BaselineStatus.LEARNING && learnable && learn(seg, wall)
         rejectedAtLastSegment = extractor.rejected
         if (issue == RecordingIssue.NOT_STEADY) setIssue(RecordingIssue.NONE)
@@ -373,7 +453,7 @@ class FitToDriveMonitor(
             onEvent(FitToDriveEvent.StateChanged)
             if (walkSessionActive) walkSessionProgress()
         }
-        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable))
+        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable, pos = pos, posDist = posDist))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         val needed = if (practice != null) config.practiceWalkSegments else config.minWalkSegments
         if (!onRequest && waitUntil != Long.MIN_VALUE && recent.size >= needed) {
@@ -434,8 +514,10 @@ class FitToDriveMonitor(
      * learned. Progress is reported as [FitToDriveEvent.WalkSession] to be spoken.
      * False if the walk is already learned or a balance test is running.
      */
-    fun startWalkRecording(t: Long): Boolean {
-        if (!enabled || status() != BaselineStatus.LEARNING || balanceTest.running) return false
+    fun startWalkRecording(t: Long, position: CarryPosition = CarryPosition.POCKET): Boolean {
+        if (!enabled || statusOf(position) != BaselineStatus.LEARNING || balanceTest.running || onRequest) return false
+        sessionPosition = position
+        current = position
         walkSessionStart = t
         walkSessionStages.clear()
         startGuided(t)
@@ -443,7 +525,7 @@ class FitToDriveMonitor(
         return true
     }
 
-    fun stopWalkRecording() { walkSessionStart = Long.MIN_VALUE; if (!onRequest) issue = RecordingIssue.NONE }
+    fun stopWalkRecording() { walkSessionStart = Long.MIN_VALUE; sessionPosition = null; if (!onRequest) issue = RecordingIssue.NONE }
 
     private fun walkSessionStage(stage: WalkSessionStage) {
         if (walkSessionStages.add(stage)) onEvent(FitToDriveEvent.WalkSession(stage))
@@ -451,6 +533,7 @@ class FitToDriveMonitor(
 
     /** The set-up walk ends by itself as soon as enough walking is recorded. */
     private fun walkSessionProgress() {
+        sessionPosition?.let { current = it }
         walkSessionStage(WalkSessionStage.RECORDING)
         when {
             status() != BaselineStatus.LEARNING -> { walkSessionStage(WalkSessionStage.DONE); stopWalkRecording() }
@@ -491,7 +574,11 @@ class FitToDriveMonitor(
         val next = when {
             walkSessionActive && learningPaused -> RecordingIssue.STUDY_MODE
             walkSessionActive && learningBlocked -> RecordingIssue.LEARNING_PAUSED
-            outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > secs(2f) -> RecordingIssue.NOT_IN_POCKET
+            // Held and looked at while recording "in the pocket" / "elsewhere on the body" (a check takes any position).
+            sessionPosition == CarryPosition.POCKET && outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > secs(2f) ->
+                RecordingIssue.NOT_IN_POCKET
+            sessionPosition == CarryPosition.BODY && outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > secs(2f) ->
+                RecordingIssue.NOT_WHERE_CHOSEN
             notWalkingSince != Long.MIN_VALUE && t - notWalkingSince > secs(3f) -> RecordingIssue.NOT_WALKING
             // Set-up walk only: in the pocket and walking, but the last two 8 s segments failed the
             // quality checks. (During a check an unsteady walk is the point: never asked to walk steadily.)
@@ -500,7 +587,9 @@ class FitToDriveMonitor(
             else -> RecordingIssue.NONE
         }
         // Not in the pocket / not walking: the earlier failed segments are no evidence about the next walk.
-        if (next == RecordingIssue.NOT_WALKING || next == RecordingIssue.NOT_IN_POCKET) rejectedAtLastSegment = extractor.rejected
+        if (next == RecordingIssue.NOT_WALKING || next == RecordingIssue.NOT_IN_POCKET || next == RecordingIssue.NOT_WHERE_CHOSEN) {
+            rejectedAtLastSegment = extractor.rejected
+        }
         if (next != pendingIssue) { pendingIssue = next; pendingSince = t }
         if (t - pendingSince >= secs(ISSUE_STABLE_SEC)) setIssue(next)
     }
@@ -518,7 +607,7 @@ class FitToDriveMonitor(
      * to see the warning and the balance check. False if nothing can be checked yet.
      */
     fun startPractice(t: Long, kind: PracticeWalk): Boolean {
-        if (!enabled || status() == BaselineStatus.LEARNING || balanceTest.running) return false
+        if (!enabled || overallStatus() == BaselineStatus.LEARNING || balanceTest.running) return false
         pruneRecent(t)        // earlier walking is judged and learned (or not) as usual...
         recent.clear()        // ...but never mixed into the test walk
         extractor.reset()
@@ -556,23 +645,24 @@ class FitToDriveMonitor(
     fun dismissAdvice() { advice = FitAdvice.NONE; practiceAdvice = false; onEvent(FitToDriveEvent.StateChanged) }
 
     fun resetLearning() {
-        baseline.clear(); references.clear(); recent.clear(); cancelPractice(); stopWalkRecording()
+        baselines.values.forEach { it.clear() }; references.clear(); recent.clear(); cancelPractice(); stopWalkRecording()
         lastCheck = null; lastBalance = null; advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE
         practiceAdvice = false; restoredWarning = null
         onEvent(FitToDriveEvent.StateChanged)
     }
 
     fun exportState(): FitToDriveState {
-        restoredWarning?.let { return FitToDriveState(baseline.snapshot(), references.toList(), it.warnedWallMillis, it.advice, it.adviceWallMillis) }
+        val all = baselines.values.flatMap { it.snapshot() }
+        restoredWarning?.let { return FitToDriveState(all, references.toList(), it.warnedWallMillis, it.advice, it.adviceWallMillis) }
         val realAdvice = if (warningActive && !practiceAdvice && adviceT != Long.MIN_VALUE) advice else FitAdvice.NONE
-        return FitToDriveState(baseline.snapshot(), references.toList(),
+        return FitToDriveState(all, references.toList(),
             warnedWallMillis = if (warnedT != Long.MIN_VALUE) wallClockOf(warnedT) else null,
             advice = realAdvice,
             adviceWallMillis = if (realAdvice != FitAdvice.NONE) wallClockOf(adviceT) else null)
     }
 
     fun restore(state: FitToDriveState) {
-        baseline.restore(state.baseline)
+        for ((p, b) in baselines) b.restore(state.baseline.filter { it.position == p })
         references.clear(); references.addAll(state.balanceReferences.takeLast(config.balanceReferences))
         restoredWarning = if (state.warnedWallMillis != null || state.advice != FitAdvice.NONE) state else null
     }
@@ -593,10 +683,13 @@ class FitToDriveMonitor(
 
     fun report(t: Long = lastT) = FitToDriveReport(
         enabled = enabled,
-        baselineStatus = status(),
-        baselineSegments = baseline.size,
-        baselineDays = baseline.days,
-        baselineWalkMinutes = baseline.size * segmentSeconds / 60f,
+        baselineStatus = overallStatus(),
+        baselineSegments = baselines.values.sumOf { it.size },
+        baselineDays = baselines.values.maxOf { it.days },
+        baselineWalkMinutes = baselines.values.sumOf { it.size } * segmentSeconds / 60f,
+        learnedPositions = learnedPositions().toSet(),
+        sessionPosition = sessionPosition,
+        currentPosition = if (walkSessionActive || onRequest) lastSegmentPosition else null,
         segmentsForProvisional = config.segmentsForProvisional,
         segmentsForEstablished = config.segmentsForEstablished,
         daysForEstablished = config.daysForEstablished,
@@ -604,10 +697,10 @@ class FitToDriveMonitor(
         checkSecondsLeft = if (onRequest) ((waitUntil - t) / 1e9f).coerceAtLeast(0f) else 0f,
         // A few seconds of grace: putting the phone away is not "walking with it in the hand".
         walkingOutsidePocket = outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > 3_000_000_000L,
-        recordingWalk = enabled && walkingNow && inPocketNow,
+        recordingWalk = enabled && walkingNow, // any carrying position counts
         walkSession = walkSessionActive,
         walkRecordedSec = if (onRequest) (if (recent.isEmpty()) 0f else extractor.segmentSamples / 50f + (recent.size - 1) * segmentSeconds)
-            else minOf(baseline.size, config.segmentsForProvisional) * segmentSeconds,
+            else minOf(baselines.getValue(sessionPosition ?: current).size, config.segmentsForProvisional) * segmentSeconds,
         walkRecordedNeededSec = config.segmentsForProvisional * segmentSeconds,
         guidedSteps = guidedSteps,
         recordingIssue = if (walkSessionActive || onRequest) issue else sessionFailedIssue ?: RecordingIssue.NONE,
@@ -675,7 +768,7 @@ class FitToDriveMonitor(
             val r = recent.first()
             val ok = !r.learned && r.learnable && (r.verdict ?: judgeOldestWalk())
             recent.removeFirst()
-            if (ok) learned = learn(r.seg, r.wall) || learned
+            if (ok) learned = learn(r.seg, r.wall, r.pos) || learned
         }
         if (learned) onEvent(FitToDriveEvent.StateChanged)
     }
@@ -690,8 +783,10 @@ class FitToDriveMonitor(
      */
     private fun judgeOldestWalk(): Boolean {
         val first = recent.first()
+        current = first.pos
         val until = first.seg.tEndNanos + secs(config.learnWindowSegments * segmentSeconds)
-        val window = recent.asSequence().takeWhile { it.seg.tEndNanos <= until }.take(config.learnWindowSegments).toList()
+        val window = recent.asSequence().takeWhile { it.seg.tEndNanos <= until && it.pos == first.pos }
+            .take(config.learnWindowSegments).toList()
         val normal = status() == BaselineStatus.LEARNING || run {
             val th = baseline.thresholds(window.size) ?: return@run false
             val distances = FloatArray(window.size)
@@ -703,19 +798,20 @@ class FitToDriveMonitor(
         return normal
     }
 
-    private fun learn(seg: GaitSegment, wall: Long): Boolean {
+    private fun learn(seg: GaitSegment, wall: Long, pos: CarryPosition = current): Boolean {
         if (learningBlocked) return false
+        current = pos
         if (status() == BaselineStatus.ESTABLISHED) {
             val d = baseline.deviation(seg.values) ?: return false
             val th = baseline.thresholds(1) ?: return false
             if (d.distance > th.large) return false
         }
-        return baseline.add(BaselineEntry(wall, dayKeyOf(wall), seg.values))
+        return baseline.add(BaselineEntry(wall, dayKeyOf(wall), seg.values, pos, seg.signature))
     }
 
     private fun learnAll(segments: List<Recent>) {
         var learned = false
-        for (r in segments) if (!r.learned && r.learnable) learned = learn(r.seg, r.wall) || learned
+        for (r in segments) if (!r.learned && r.learnable) learned = learn(r.seg, r.wall, r.pos) || learned
         if (learned) onEvent(FitToDriveEvent.StateChanged)
     }
 
@@ -727,12 +823,19 @@ class FitToDriveMonitor(
         recent.clear() // each walk is scored once
         val p = practice
         practice = null
+        val walk = pending.takeLast(config.maxWalkSegments)
+        // The walk is compared with the walk learned where the phone mostly was.
+        val pos = walk.groupingBy { it.pos }.eachCount().maxByOrNull { it.value }!!.key
+        current = pos
         if (status() == BaselineStatus.LEARNING) {
             learnAll(pending)
-            publishCheck(notScoredCheck(t, trigger, NotScoredReason.STILL_LEARNING, p))
+            // Held in the hand but only other positions recorded: say so rather than guess.
+            val reason = if (overallStatus() != BaselineStatus.LEARNING) NotScoredReason.POSITION_NOT_LEARNED else NotScoredReason.STILL_LEARNING
+            publishCheck(notScoredCheck(t, trigger, reason, p))
             return true
         }
-        val walk = pending.takeLast(config.maxWalkSegments)
+        val dists = walk.map { it.posDist }.filter { !it.isNaN() }.sorted()
+        val unfamiliar = dists.isNotEmpty() && dists[dists.size / 2] > config.positionUnfamiliarDist
         val th = baseline.thresholds(walk.size) ?: return false
         val zSum = DoubleArray(GaitFeature.COUNT)
         val zN = IntArray(GaitFeature.COUNT)
@@ -744,7 +847,10 @@ class FitToDriveMonitor(
         }
         val score = GaitBaseline.walkDistance(distances)
         val level = when {
-            score >= th.large -> WalkLevel.LARGE_GAP
+            // Carried in a way never recorded (e.g. an armband): it cannot be compared reliably
+            // (8/10 sober false alarms on Shoaib's upper arm, 1/10 with this), so a big gap only offers the balance
+            // check. Unsteady walks in recorded positions never looked unfamiliar there (0/40).
+            score >= th.large && !unfamiliar -> WalkLevel.LARGE_GAP
             score >= th.unusual -> WalkLevel.UNUSUAL
             else -> WalkLevel.NORMAL
         }
@@ -773,7 +879,7 @@ class FitToDriveMonitor(
             }
         }
         publishCheck(WalkCheck(wallClockOf(t), trigger, level, null, score, th.unusual, th.large,
-            th.percentile(score), walk.size, status() != BaselineStatus.ESTABLISHED, top, p))
+            th.percentile(score), walk.size, status() != BaselineStatus.ESTABLISHED, top, p, pos, unfamiliar))
         return true
     }
 

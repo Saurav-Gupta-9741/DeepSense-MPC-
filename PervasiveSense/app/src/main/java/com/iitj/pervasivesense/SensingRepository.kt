@@ -39,7 +39,7 @@ object SensingRepository {
         fun requestFitCheck()
         fun startBalanceTest(purpose: BalancePurpose, practice: Boolean)
         fun cancelContactAlert()
-        fun startWalkRecording()
+        fun startWalkRecording(position: CarryPosition)
         fun stopWalkRecording()
         fun sendTestAlert()
         fun cancelBalanceTest()
@@ -93,7 +93,7 @@ object SensingRepository {
     /** "Cancel – I'm a passenger". */
     fun cancelContactAlert() { controller?.cancelContactAlert() }
     fun sendTestAlert() { controller?.sendTestAlert() }
-    fun startWalkRecording() { controller?.startWalkRecording() }
+    fun startWalkRecording(position: CarryPosition) { controller?.startWalkRecording(position) }
     fun stopWalkRecording() { controller?.stopWalkRecording() }
     fun cancelBalanceTest() { controller?.cancelBalanceTest() }
     fun startFitPractice(kind: PracticeWalk) { controller?.startFitPractice(kind) }

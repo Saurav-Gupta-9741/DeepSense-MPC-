@@ -205,9 +205,9 @@ class SensingEngine(
     fun stopWalkRecording() = fitCommand { fitToDrive.stopWalkRecording() }
 
     /** Set-up step 1, guided; false if the walk is already learned or no sensor data yet. */
-    fun startWalkRecording(): Boolean {
+    fun startWalkRecording(position: CarryPosition = CarryPosition.POCKET): Boolean {
         if (lastSampleT == Long.MIN_VALUE) return false
-        val ok = fitToDrive.startWalkRecording(lastSampleT)
+        val ok = fitToDrive.startWalkRecording(lastSampleT, position)
         publish(lastSampleT)
         return ok
     }

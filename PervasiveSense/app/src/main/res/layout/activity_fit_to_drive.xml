@@ -333,9 +333,29 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="22dp"
                         android:layout_marginTop="6dp"
-                        android:text="@string/fit_step1_start"
+                        android:text="@string/fit_pos_pocket_start"
                         android:textColor="@color/bg_dark"
                         app:backgroundTint="@color/primary_cyan"
+                        app:cornerRadius="12dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStep1Hand"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:text="@string/fit_pos_hand_start"
+                        android:textColor="@color/primary_glow"
+                        app:cornerRadius="12dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStep1Body"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="22dp"
+                        android:text="@string/fit_pos_body_start"
+                        android:textColor="@color/primary_glow"
                         app:cornerRadius="12dp" />
 
                     <!-- Step 2: normal balance -->
@@ -516,6 +536,41 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp" />
+
+                    <!-- Record another way of carrying the phone (1 min each) -->
+                    <LinearLayout
+                        android:id="@+id/rowAddPosition"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnAddPocket"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/fit_pos_add_pocket"
+                            android:textColor="@color/primary_glow" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnAddHand"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/fit_pos_add_hand"
+                            android:textColor="@color/primary_glow" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnAddBody"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/fit_pos_add_body"
+                            android:textColor="@color/primary_glow" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

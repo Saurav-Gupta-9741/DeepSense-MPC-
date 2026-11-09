@@ -2,6 +2,7 @@ package com.iitj.pervasivesense
 
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.ln
 import kotlin.math.sqrt
 
 /**
@@ -23,7 +24,19 @@ enum class GaitFeature(val label: String, val direction: Int) {
 }
 
 /** One analysed stretch of walking; [values] is indexed by [GaitFeature.ordinal]. */
-class GaitSegment(val tEndNanos: Long, val values: FloatArray)
+class GaitSegment(
+    val tEndNanos: Long,
+    val values: FloatArray,
+    /**
+     * How the phone moves on the body (not how the person walks): ln of the gyroscope RMS,
+     * ln of the RMS of |a|, ln of horizontal/vertical dynamic acceleration. All orientation-free.
+     * A trouser pocket swings with the leg, a hand with the arm, a jacket or belt barely rotates:
+     * matched against the user's own recorded positions (97.9 % right on Shoaib et al. 2014).
+     */
+    val signature: FloatArray = FloatArray(SIGNATURE_SIZE) { Float.NaN }
+) {
+    companion object { const val SIGNATURE_SIZE = 3 }
+}
 
 /**
  * Cuts continuous walking into overlapping segments ([segmentSamples] long, a
@@ -159,6 +172,7 @@ class GaitSegmentExtractor(
         }
         val vRms = sqrt(vv / n)
         if (vRms < 0.5) return null // no real gait in this segment
+        val signature = signature(n, vv + s11 + s22, vv, hasGyro)
         s11 /= n; s22 /= n; s12 /= n
 
         // Side-to-side axis = minor principal axis of the horizontal plane.
@@ -217,7 +231,28 @@ class GaitSegmentExtractor(
         values[GaitFeature.SWAY.ordinal] = (sqrt(lambdaMin) / vRms).toFloat()
         values[GaitFeature.SWAY_IRREGULARITY.ordinal] = (sqrt(sideDiff / (2 * m)) / vRms).toFloat()
         values[GaitFeature.TURN_UNSTEADINESS.ordinal] = if (hasGyro) sqrt(yawDiff / (2 * m)).toFloat() else Float.NaN
-        return GaitSegment(tEnd, values)
+        return GaitSegment(tEnd, values, signature)
+    }
+
+    /** See [GaitSegment.signature]. [all] and [vertical]: summed squared dynamic acceleration. */
+    private fun signature(n: Int, all: Double, vertical: Double, hasGyro: Boolean): FloatArray {
+        var m1 = 0.0; var m2 = 0.0
+        val gm = DoubleArray(3)
+        for (i in 0 until n) {
+            val ax = win[i * 6].toDouble(); val ay = win[i * 6 + 1].toDouble(); val az = win[i * 6 + 2].toDouble()
+            val a = sqrt(ax * ax + ay * ay + az * az); m1 += a; m2 += a * a
+            for (k in 0..2) gm[k] += win[i * 6 + 3 + k].toDouble()
+        }
+        val mean = m1 / n
+        val dyn = sqrt(maxOf(0.0, m2 / n - mean * mean))
+        var gyro = Float.NaN
+        if (hasGyro) {
+            var gr = 0.0
+            for (i in 0 until n) for (k in 0..2) { val x = win[i * 6 + 3 + k] - gm[k] / n; gr += x * x }
+            gyro = ln(sqrt(gr / n) + 0.05).toFloat()
+        }
+        val hv = sqrt(maxOf(1e-6, all - vertical) / maxOf(1e-6, vertical))
+        return floatArrayOf(gyro, ln(dyn + 0.05).toFloat(), ln(hv).toFloat())
     }
 
     /**
