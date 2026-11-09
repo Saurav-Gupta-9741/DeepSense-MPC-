@@ -262,7 +262,9 @@ class FitToDriveMonitor(
      * not [learnable] if it was recorded while learning was blocked (warning, study session, practice walk).
      */
     private class Recent(val seg: GaitSegment, val wall: Long, val learned: Boolean, val learnable: Boolean,
-                         val pos: CarryPosition, val posDist: Float) {
+                         val pos: CarryPosition, val posDist: Float,
+                         /** Position known (held and looked at, or the set-up walk's choice), not guessed from the motion. */
+                         val certain: Boolean = false) {
         /** Unchecked walk judged on leaving the window: normal or not (shared by the whole ≈ 1 min judged). */
         var verdict: Boolean? = null
     }
@@ -471,7 +473,8 @@ class FitToDriveMonitor(
             onEvent(FitToDriveEvent.StateChanged)
             if (walkSessionActive) walkSessionProgress()
         }
-        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable, pos = pos, posDist = posDist))
+        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable, pos = pos, posDist = posDist,
+            certain = sessionPosition != null || viewing))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         val needed = if (practice != null) config.practiceWalkSegments else config.minWalkSegments
         // Check my walk, going on for more walking: enough now, score it on the next sample.
@@ -857,8 +860,13 @@ class FitToDriveMonitor(
             publishCheck(notScoredCheck(t, trigger, reason, p))
             return true
         }
-        val dists = walk.map { it.posDist }.filter { !it.isNaN() }.sorted()
-        val unfamiliar = dists.isNotEmpty() && dists[dists.size / 2] > config.positionUnfamiliarDist
+        // "Carried in a way never recorded" only when the position was guessed from the motion. Held and
+        // looked at, it is surely the hand: a wobbly walk moves the phone differently, but that is the
+        // unsteadiness to catch, not another position (real phone: a wobbly walk in the hand was called
+        // "unfamiliar" and downgraded from very different to a bit unusual).
+        val guessed = walk.filter { !it.certain }
+        val dists = guessed.map { it.posDist }.filter { !it.isNaN() }.sorted()
+        val unfamiliar = guessed.size * 2 > walk.size && dists.isNotEmpty() && dists[dists.size / 2] > config.positionUnfamiliarDist
         val th = baseline.thresholds(walk.size) ?: return false
         val zSum = DoubleArray(GaitFeature.COUNT)
         val zN = IntArray(GaitFeature.COUNT)

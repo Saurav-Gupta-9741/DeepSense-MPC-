@@ -88,9 +88,29 @@ class FitToDrivePositionsTest {
         assertEquals(NotScoredReason.POSITION_NOT_LEARNED, a.notScored)
         // Recorded in the hand once: now checked against it.
         t = record(m, CarryPosition.HAND, listOf(pocket1, pocket2), t1, inPocket = false)
-        val (b, _) = check(m, pocket3, t + gap, inPocket = false)
+        val (b, t2) = check(m, pocket3, t + gap, inPocket = false)
         assertEquals(CarryPosition.HAND, b.position)
         assertEquals(WalkLevel.NORMAL, b.level)
+        // A wobbly walk in the hand: surely the hand (held and looked at), so never "a way you haven't
+        // recorded"; the full warning, not a downgraded "a bit unusual" (real-phone finding, v3.2).
+        val (c, _) = check(m, pocket3.impaired(1.0), t2, inPocket = false)
+        assertEquals(CarryPosition.HAND, c.position)
+        assertFalse(c.unfamiliarPosition)
+        assertEquals(WalkLevel.LARGE_GAP, c.level)
+    }
+
+    @Test
+    fun aWobblyWalkThatMovesThePhoneDifferentlyIsStillCaughtInTheHand() {
+        // Wobbling swings the held phone far more than a normal walk (here 3x the rotation and
+        // sideways shake): by the motion alone it looks like another way of carrying.
+        val m = monitor()
+        val t = record(m, CarryPosition.HAND, listOf(pocket1, pocket2), start, inPocket = false)
+        val wobble = pocket3.impaired(1.0).let { r -> Recording(r.t.copyOf(), Array(r.size) { i ->
+            val d = r.data[i]; FloatArray(6) { k -> if (k >= 3) 3f * d[k] else if (k == 0) d[k] * 1.8f else d[k] } }) }
+        val (c, _) = check(m, wobble, t + gap, inPocket = false)
+        assertEquals(CarryPosition.HAND, c.position)
+        assertFalse(c.unfamiliarPosition)
+        assertTrue("${c.level} ${c.notScored}", c.level == WalkLevel.LARGE_GAP || c.notScored == NotScoredReason.TOO_IRREGULAR)
     }
 
     @Test

@@ -327,3 +327,11 @@ shoulder is not attached to the body and is less reliable.
   that finds no signal is tried again every 30 s, up to 4 more times. If it still fails, the screen says why in
   plain words and shows **Send it from Messages**, with the alert already written in.
 - The location in the text had lost its space ("needed.Location"). Fixed.
+
+## v3.2: a wobbly walk in the hand gets the full warning
+
+On the phone, a wobbly walk with the phone held in the hand was flagged "a way you haven't recorded"
+and downgraded from **very different** to **a bit unusual**. Wobbling swings a held phone much more
+than a normal walk, so the motion alone looked like another way of carrying it. "Unfamiliar" now applies only
+when the position is guessed from the motion. Held and looked at (or chosen for the set-up walk), the
+position is certain and the walk gets its full result. The real-person accuracy per position is unchanged.
