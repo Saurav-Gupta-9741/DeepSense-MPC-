@@ -88,6 +88,8 @@ data class FitToDriveReport(
     val waitingForWalk: Boolean,
     /** "Check my walk" countdown (0 when none is running). */
     val checkSecondsLeft: Float,
+    /** "Check my walk" needed more walking after its 30 s and is still going (up to [FitToDriveMonitor.Config.checkMaxSec]). */
+    val checkExtended: Boolean,
     /** Walking, but the phone is not in a pocket: this walk is not used. */
     val walkingOutsidePocket: Boolean,
     /** Walking with the phone in a pocket right now: this walk is being recorded. */
@@ -148,6 +150,8 @@ sealed interface FitToDriveEvent {
     class ErraticDriving(val events: List<DrivingEvent>) : FitToDriveEvent
     /** Every analysed walking segment, with its distance from normal (NaN while learning): study log. */
     class SegmentMeasured(val segment: GaitSegment, val distance: Float) : FitToDriveEvent
+    /** Check my walk: too little walking recorded in its 30 s, it goes on until there is enough (spoken: keep walking). */
+    object CheckExtended : FitToDriveEvent
     /** Learned data changed (persist it). */
     object StateChanged : FitToDriveEvent
 }
@@ -205,6 +209,10 @@ class FitToDriveMonitor(
         val manualWaitSec: Float = 180f,
         /** "Check my walk" scores exactly the walking of this long after the tap. */
         val checkSec: Float = 30f,
+        /** ...but if the user walked (at least [checkExtendMinSteps] steps, or is walking) and too little
+         *  could be measured yet (late start, turns, pauses), it goes on, and ends as soon as there is enough. */
+        val checkMaxSec: Float = 90f,
+        val checkExtendMinSteps: Int = 8,
         /** ...and if it could not measure the walk although this many segments failed the quality
          *  checks and at least [irregularMinSteps] steps were counted, the walk is "too irregular". */
         val irregularSegments: Int = 3,
@@ -278,6 +286,8 @@ class FitToDriveMonitor(
     private var practice: PracticeWalk? = null
     /** "Check my walk" is timing its 30 s walk: scored at the end, never learned as normal. */
     private var onRequest = false
+    private var checkStartT = Long.MIN_VALUE
+    private var checkExtended = false
     /** Time of the last real warning (not from a practice test); cleared by a passed balance check. */
     private var warnedT = Long.MIN_VALUE
     private var lastReminderT = Long.MIN_VALUE
@@ -400,6 +410,13 @@ class FitToDriveMonitor(
         // Held and looked at, or not: only a change lasting 2 s counts (the pocket sensor flickers).
         if (!inPocket != viewingCandidate) { viewingCandidate = !inPocket; viewingCandidateT = t }
         if (viewingCandidate != stableViewing && t - viewingCandidateT >= secs(2f)) { stableViewing = viewingCandidate; viewingChangedT = t }
+        if (onRequest && t >= waitUntil && recent.size < config.minWalkSegments && !checkExtended &&
+            (walkingNow || guidedSteps >= config.checkExtendMinSteps)) {
+            // Walked, but not enough measured yet (started late, turned, paused): keep going rather than "no walk".
+            checkExtended = true
+            waitUntil = checkStartT + secs(config.checkMaxSec)
+            onEvent(FitToDriveEvent.CheckExtended)
+        }
         if (onRequest && t >= waitUntil) {
             waitUntil = Long.MIN_VALUE
             if (!evaluate(t, CheckTrigger.MANUAL)) {
@@ -418,6 +435,7 @@ class FitToDriveMonitor(
                     if (irregular) NotScoredReason.TOO_IRREGULAR else NotScoredReason.NO_RECENT_WALK))
             }
             onRequest = false
+            checkExtended = false
             if (!walkSessionActive) issue = RecordingIssue.NONE
         }
         if (waitUntil != Long.MIN_VALUE && t > waitUntil) {
@@ -456,6 +474,8 @@ class FitToDriveMonitor(
         recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable, pos = pos, posDist = posDist))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         val needed = if (practice != null) config.practiceWalkSegments else config.minWalkSegments
+        // Check my walk, going on for more walking: enough now, score it on the next sample.
+        if (onRequest && checkExtended && recent.size >= needed) waitUntil = t
         if (!onRequest && waitUntil != Long.MIN_VALUE && recent.size >= needed) {
             waitUntil = Long.MIN_VALUE
             evaluate(t, CheckTrigger.MANUAL)
@@ -505,6 +525,8 @@ class FitToDriveMonitor(
         extractor.reset()
         practice = null
         onRequest = true
+        checkStartT = t
+        checkExtended = false
         waitUntil = t + secs(config.checkSec)
         startGuided(t)
     }
@@ -695,6 +717,7 @@ class FitToDriveMonitor(
         daysForEstablished = config.daysForEstablished,
         waitingForWalk = waitUntil != Long.MIN_VALUE,
         checkSecondsLeft = if (onRequest) ((waitUntil - t) / 1e9f).coerceAtLeast(0f) else 0f,
+        checkExtended = onRequest && checkExtended,
         // A few seconds of grace: putting the phone away is not "walking with it in the hand".
         walkingOutsidePocket = outsidePocketSince != Long.MIN_VALUE && t - outsidePocketSince > 3_000_000_000L,
         recordingWalk = enabled && walkingNow, // any carrying position counts

@@ -365,6 +365,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         }
         when (event) {
             is FitToDriveEvent.StateChanged -> Unit
+            is FitToDriveEvent.CheckExtended -> speak(getString(R.string.fit_say_check_more), interrupt = false)
             is FitToDriveEvent.SegmentMeasured -> studyLogSegment(event)
             is FitToDriveEvent.WalkChecked -> {
                 studyLogCheck(event.check)

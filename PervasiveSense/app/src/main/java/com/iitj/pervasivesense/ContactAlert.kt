@@ -56,10 +56,20 @@ class ContactAlert(
         const val NOTIFICATION_ID = 1005
         const val ACTION_CANCEL = "com.iitj.pervasivesense.action.CANCEL_ALERT"
         private const val REPEAT_MS = 3_600_000L
+        /** No signal (e.g. a tunnel, a basement car park): a real alert is tried again every 30 s, 4 more times. */
+        private const val RETRY_ROUNDS = 4
+        private const val RETRY_MS = 30_000L
+        private const val ANSWER_TIMEOUT_MS = 45_000L
+        private const val CODE_TIMEOUT = -100
+        private const val CODE_EXCEPTION = -101
         private const val LOCATION_MAX_AGE_MS = 15 * 60_000L
 
         fun hasSmsPermission(c: Context) =
             ContextCompat.checkSelfPermission(c, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+
+        /** Lets the alert find every SIM (dual SIM: the default one may have no signal). Optional. */
+        fun hasPhoneStatePermission(c: Context) =
+            ContextCompat.checkSelfPermission(c, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
 
         fun hasLocationPermission(c: Context) =
             ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -93,6 +103,7 @@ class ContactAlert(
         val last = lastSent[k]
         if (k != AlertKind.TEST && last != null && now - last < REPEAT_MS) return false
         if (!ready(context)) return false
+        SensingRepository.setFailedSms(null)
         kind = k
         deadline = now + 1000L * (if (k == AlertKind.TEST) TEST_COUNTDOWN_SEC else COUNTDOWN_SEC)
         location = null
@@ -150,13 +161,26 @@ class ContactAlert(
             text += context.getString(R.string.fit_sms_location,
                 String.format(Locale.US, "https://maps.google.com/?q=%.5f,%.5f", loc.latitude, loc.longitude))
         }
-        val phone = FitToDriveStore.contactPhone(context)
-        // "Sent" only once the network confirms; on failure Messages is one tap away.
+        deliver(k, FitToDriveStore.contactPhone(context), text, 0)
+    }
+
+    /**
+     * "Sent" only once the network confirms. Every SIM is tried; a real alert that finds no
+     * signal is tried again [RETRY_ROUNDS] times; on failure Messages is one tap away.
+     */
+    private fun deliver(k: AlertKind, phone: String, text: String, round: Int) {
         sendSms(phone, text) { ok, code ->
+            val noSignal = code == SmsManager.RESULT_ERROR_NO_SERVICE || code == SmsManager.RESULT_ERROR_RADIO_OFF ||
+                code == SmsManager.RESULT_ERROR_GENERIC_FAILURE
+            if (!ok && k != AlertKind.TEST && noSignal && round < RETRY_ROUNDS) {
+                Log.w(TAG, "SMS failed ($code), trying again in ${RETRY_MS / 1000} s")
+                handler.postDelayed({ deliver(k, phone, text, round + 1) }, RETRY_MS)
+                return@sendSms
+            }
             if (ok) lastSent[k] = SystemClock.elapsedRealtime()
             val at = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
             val result = if (ok) context.getString(R.string.fit_alert_sent, contactName(), at)
-                else context.getString(R.string.fit_alert_failed, contactName(), at) + " (" + code + ")"
+                else context.getString(R.string.fit_alert_failed, contactName(), at, describe(code))
             val n = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(result)
@@ -164,61 +188,111 @@ class ContactAlert(
                 .setContentIntent(if (ok) openScreen() else openMessages(phone, text))
                 .setAutoCancel(true)
             if (!ok) n.setContentText(context.getString(R.string.fit_alert_open_messages))
+                .setStyle(NotificationCompat.BigTextStyle().bigText(result + "\n" + context.getString(R.string.fit_alert_open_messages)))
             notificationManager.notify(NOTIFICATION_ID, n.build())
+            SensingRepository.setFailedSms(if (ok) null else phone to text)
             SensingRepository.setMessage(result)
             say(context.getString(if (ok) R.string.fit_say_alert_sent else R.string.fit_say_alert_failed))
         }
     }
 
-    /** The SIM to text from: the default SMS SIM, or (dual SIM set to "ask every time") the calls SIM. */
-    private fun smsManager(): SmsManager {
-        val ids = listOf(SubscriptionManager.getDefaultSmsSubscriptionId(),
-            SubscriptionManager.getDefaultVoiceSubscriptionId(), SubscriptionManager.getDefaultSubscriptionId())
-        val id = ids.firstOrNull { it != SubscriptionManager.INVALID_SUBSCRIPTION_ID }
-        return if (Build.VERSION.SDK_INT >= 31) {
-            val base = context.getSystemService(SmsManager::class.java)
-            if (id != null) base.createForSubscriptionId(id) else base
-        } else {
-            @Suppress("DEPRECATION")
-            if (id != null) SmsManager.getSmsManagerForSubscriptionId(id) else SmsManager.getDefault()
+    private fun describe(code: Int?) = when (code) {
+        SmsManager.RESULT_ERROR_NO_SERVICE -> context.getString(R.string.fit_sms_err_no_service)
+        SmsManager.RESULT_ERROR_RADIO_OFF -> context.getString(R.string.fit_sms_err_radio_off)
+        SmsManager.RESULT_ERROR_GENERIC_FAILURE -> context.getString(R.string.fit_sms_err_refused)
+        SmsManager.RESULT_ERROR_LIMIT_EXCEEDED -> context.getString(R.string.fit_sms_err_limit)
+        CODE_TIMEOUT -> context.getString(R.string.fit_sms_err_timeout)
+        null, CODE_EXCEPTION -> context.getString(R.string.fit_sms_err_blocked)
+        else -> context.getString(R.string.fit_sms_err_other, code)
+    }
+
+    /**
+     * SIMs to text from, best first: the default SMS SIM, the calls SIM, the mobile-data SIM, then
+     * any other active SIM (needs READ_PHONE_STATE). A dual-SIM phone's default may have no signal
+     * ("error 4" on a real phone while the other SIM worked), so each is tried in turn.
+     */
+    @SuppressLint("MissingPermission") // checked
+    private fun smsSubscriptions(): List<Int> {
+        val ids = LinkedHashSet<Int>()
+        ids += SubscriptionManager.getDefaultSmsSubscriptionId()
+        ids += SubscriptionManager.getDefaultVoiceSubscriptionId()
+        ids += SubscriptionManager.getDefaultDataSubscriptionId()
+        ids += SubscriptionManager.getDefaultSubscriptionId()
+        ids.remove(SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+        if (hasPhoneStatePermission(context)) {
+            val active = runCatching {
+                context.getSystemService(SubscriptionManager::class.java)?.activeSubscriptionInfoList?.map { it.subscriptionId }
+            }.getOrNull()
+            if (!active.isNullOrEmpty()) { ids.retainAll(active.toSet()); ids += active }
         }
+        return ids.toList()
+    }
+
+    private fun smsManager(id: Int?): SmsManager = if (Build.VERSION.SDK_INT >= 31) {
+        val base = context.getSystemService(SmsManager::class.java)
+        if (id != null) base.createForSubscriptionId(id) else base
+    } else {
+        @Suppress("DEPRECATION")
+        if (id != null) SmsManager.getSmsManagerForSubscriptionId(id) else SmsManager.getDefault()
+    }
+
+    /** Tries each SIM until one sends; [done] gets the last error code (null: could not even try). */
+    private fun sendSms(phone: String, text: String, done: (Boolean, Int?) -> Unit) {
+        val subs: List<Int?> = smsSubscriptions().ifEmpty { listOf(null) } // null: Android's default
+        var lastCode: Int? = null
+        fun attempt(i: Int) {
+            if (i >= subs.size) { done(false, lastCode); return }
+            sendOnce(subs[i], phone, text) { code ->
+                when (code) {
+                    Activity.RESULT_OK -> done(true, null)
+                    // No answer: it may still go out; trying another SIM could send it twice.
+                    CODE_TIMEOUT -> done(false, code)
+                    else -> { Log.w(TAG, "SMS on subscription ${subs[i]} failed: $code"); lastCode = code; attempt(i + 1) }
+                }
+            }
+        }
+        attempt(0)
     }
 
     @SuppressLint("MissingPermission", "UnspecifiedRegisterReceiverFlag") // permission checked in ready()
-    private fun sendSms(phone: String, text: String, done: (Boolean, String) -> Unit) {
+    private fun sendOnce(sub: Int?, phone: String, text: String, result: (Int) -> Unit) {
         val number = phone.filter { it.isDigit() || it == '+' }
-        val action = "com.iitj.pervasivesense.SMS_SENT." + SystemClock.elapsedRealtime()
+        val action = "com.iitj.pervasivesense.SMS_SENT." + SystemClock.elapsedRealtime() + "." + (sub ?: "default")
         var finished = false
-        fun finish(ok: Boolean, code: String) { if (!finished) { finished = true; done(ok, code) } }
+        var receiver: BroadcastReceiver? = null
+        fun finish(code: Int) {
+            if (finished) return
+            finished = true
+            receiver?.let { r -> runCatching { context.unregisterReceiver(r) } }
+            result(code)
+        }
         try {
-            val sms = smsManager()
+            val sms = smsManager(sub)
             val parts = sms.divideMessage(text)
             var pending = parts.size
-            var failed: String? = null
-            val receiver = object : BroadcastReceiver() {
+            var failed: Int? = null
+            val r = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
-                    if (resultCode != Activity.RESULT_OK && failed == null) failed = "error $resultCode"
+                    if (resultCode != Activity.RESULT_OK && failed == null) failed = resultCode
                     if (--pending > 0) return
-                    runCatching { context.unregisterReceiver(this) }
-                    finish(failed == null, failed ?: "")
+                    finish(failed ?: Activity.RESULT_OK)
                 }
             }
+            receiver = r
             val filter = IntentFilter(action)
-            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            else context.registerReceiver(receiver, filter)
+            // Delivered on the sensing thread, like everything else here.
+            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(r, filter, null, handler, Context.RECEIVER_NOT_EXPORTED)
+            else context.registerReceiver(r, filter, null, handler)
             val sent = ArrayList(parts.indices.map {
                 PendingIntent.getBroadcast(context, 40 + it, Intent(action).setPackage(context.packageName),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             })
             sms.sendMultipartTextMessage(number, null, parts, sent, null)
-            // No answer from the network within 60 s: say so rather than claim it was sent.
-            handler.postDelayed({
-                if (!finished) runCatching { context.unregisterReceiver(receiver) }
-                finish(false, "no answer from the network")
-            }, 60_000L)
+            // No answer from the network: say so rather than claim it was sent.
+            handler.postDelayed({ finish(CODE_TIMEOUT) }, ANSWER_TIMEOUT_MS)
         } catch (e: Exception) {
             Log.e(TAG, "SMS failed", e)
-            finish(false, e.javaClass.simpleName)
+            finish(CODE_EXCEPTION)
         }
     }
 

@@ -448,6 +448,7 @@
                         android:text="@string/fit_before_drive" />
 
                     <TextView
+                        android:id="@+id/tvBeforeHint"
                         style="@style/PS.Caption"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"

@@ -779,9 +779,9 @@ class FitToDriveMonitorTest {
 
     // ---------------------------------------------------------------- set up
 
-    /** Stands still until the 30 s of "Check my walk" are over (the test walks are shorter). */
+    /** Stands still until "Check my walk" is over (30 s, up to 90 s if it needed more walking). */
     private fun endCheck(m: FitToDriveMonitor, t: Long): Long =
-        feed(m, Recording.constant(31.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        feed(m, Recording.constant(91.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
 
     @Test
     fun duringSetUpEveryPocketWalkCountsAtOnce() {
@@ -866,9 +866,59 @@ class FitToDriveMonitorTest {
         val m = monitor()
         val t = learnNormal(m)
         m.requestCheck(t)
-        endCheck(m, t)
+        // No walking at all: the answer comes at 30 s, it does not ask to keep walking.
+        feed(m, Recording.constant(31.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
         assertEquals(NotScoredReason.NO_RECENT_WALK, checks().last().notScored)
+        assertEquals(CheckTrigger.MANUAL, checks().last().trigger)
         assertEquals(FitAdvice.NONE, m.report().advice)
+        assertTrue(events.none { it is FitToDriveEvent.CheckExtended })
+    }
+
+    @Test
+    fun aCheckStartedLateGoesOnUntilTheWalkIsMeasured() {
+        // Real phone: tapped, read the screen ~20 s, then walked: only ~10 s of walking in the
+        // 30 s, so it said "no walking". Now it asks to keep walking and scores as soon as it can.
+        val m = monitor()
+        var t = learnNormal(m)
+        m.requestCheck(t)
+        t = feed(m, Recording.constant(20.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        val before = checks().size
+        assertTrue(m.report().checkSecondsLeft > 0f) // still running after 20 s of standing
+        val s = FloatArray(6)
+        var extendedSeen = false
+        for (i in 0 until session3.size) {
+            session3.data[i].copyInto(s)
+            m.processSample(t + 20_000_000L + session3.t[i], s, walking = true, hasGyro = true, steps = if (i % 25 == 0) 1 else 0)
+            if (m.report().checkExtended) { extendedSeen = true; assertTrue(m.report().checkSecondsLeft <= 60f) }
+        }
+        assertTrue(extendedSeen)
+        assertEquals(1, events.count { it is FitToDriveEvent.CheckExtended })
+        // Scored during the walk (no need to wait for 90 s), against the learned walk: normal.
+        assertEquals(before + 1, checks().size)
+        assertEquals(WalkLevel.NORMAL, checks().last().level)
+        assertFalse(m.report().checkExtended)
+        assertEquals(0f, m.report().checkSecondsLeft, 0f)
+    }
+
+    @Test
+    fun aCheckThatStillHasTooLittleWalkingAfter90SecondsEnds() {
+        val m = monitor()
+        var t = learnNormal(m)
+        m.requestCheck(t)
+        // A few steps, then standing: extended once, then "no walking" at 90 s, never twice.
+        val s = FloatArray(6)
+        for (i in 0 until 10 * 50) {
+            session3.data[i].copyInto(s)
+            m.processSample(t + i * 20_000_000L, s, walking = true, hasGyro = true, steps = if (i % 25 == 0) 1 else 0)
+        }
+        t += 10_000_000_000L
+        t = feed(m, Recording.constant(40.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        assertEquals(1, events.count { it is FitToDriveEvent.CheckExtended })
+        assertTrue(m.report().checkExtended)
+        feed(m, Recording.constant(45.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        assertEquals(NotScoredReason.NO_RECENT_WALK, checks().last().notScored)
+        assertFalse(m.report().checkExtended)
+        assertEquals(1, events.count { it is FitToDriveEvent.CheckExtended })
     }
 
     @Test

@@ -74,6 +74,10 @@ class FitToDriveActivity : AppCompatActivity() {
             setAlertContact(ok)
         }
 
+    /** Optional: lets the test alert try every SIM. Sent either way. */
+    private val phoneStatePermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> SensingRepository.sendTestAlert() }
+
     private val exportStudy = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri == null) return@registerForActivityResult
         val ok = StudyLog.exportTo(this, uri)
@@ -117,7 +121,10 @@ class FitToDriveActivity : AppCompatActivity() {
             }
         }
         binding.switchAlertContact.setOnCheckedChangeListener { _, on -> if (!bindingUi) onAlertToggled(on) }
-        binding.btnTestAlert.setOnClickListener { SensingRepository.sendTestAlert() }
+        binding.btnTestAlert.setOnClickListener {
+            if (ContactAlert.hasPhoneStatePermission(this)) SensingRepository.sendTestAlert()
+            else phoneStatePermission.launch(Manifest.permission.READ_PHONE_STATE)
+        }
         binding.btnAlertCancel.setOnClickListener { SensingRepository.cancelContactAlert() }
         binding.btnStep1.setOnClickListener {
             if (lastReport?.walkSession == true) stopRecording() else recordWalk(CarryPosition.POCKET)
@@ -137,7 +144,7 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnCheckNow.setOnClickListener {
             if (lastReport?.walkSession == true) { stopRecording(); return@setOnClickListener }
             SensingRepository.requestFitCheck()
-            say(getString(R.string.fit_say_check_start))
+            say(getString(checkHow(lastReport, spoken = true)))
         }
         binding.btnSettingsToggle.setOnClickListener { showSettings(binding.cardSettings.visibility != View.VISIBLE) }
         binding.btnBalanceCheck.setOnClickListener { startBalance(BalancePurpose.CHECK) }
@@ -273,7 +280,7 @@ class FitToDriveActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.fit_alert_no_telephony, Toast.LENGTH_LONG).show()
                 setAlertContact(false)
             }
-            else -> alertPermissions.launch(arrayOf(Manifest.permission.SEND_SMS,
+            else -> alertPermissions.launch(arrayOf(Manifest.permission.SEND_SMS, Manifest.permission.READ_PHONE_STATE,
                 Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
@@ -343,6 +350,19 @@ class FitToDriveActivity : AppCompatActivity() {
     private fun stopRecording() {
         SensingRepository.stopWalkRecording()
         voice?.stop()
+    }
+
+    /** How to walk for a check: the way the walk was recorded (only hand recorded: no "pocket"). */
+    private fun checkHow(f: FitToDriveReport?, spoken: Boolean): Int {
+        val learned = f?.learnedPositions.orEmpty()
+        val onlyHand = learned.isNotEmpty() && CarryPosition.HAND in learned && CarryPosition.POCKET !in learned
+        val onlyBody = learned == setOf(CarryPosition.BODY)
+        return when {
+            onlyHand -> if (spoken) R.string.fit_say_check_start_hand else R.string.fit_before_drive_hint_hand
+            onlyBody -> if (spoken) R.string.fit_say_check_start_body else R.string.fit_before_drive_hint_body
+            learned.size > 1 -> if (spoken) R.string.fit_say_check_start_any else R.string.fit_before_drive_hint_any
+            else -> if (spoken) R.string.fit_say_check_start else R.string.fit_before_drive_hint
+        }
     }
 
     private fun positionName(p: CarryPosition) = getString(when (p) {
@@ -451,7 +471,17 @@ class FitToDriveActivity : AppCompatActivity() {
     /** One line at the top: a problem to fix, otherwise what the walk recorder is doing right now. */
     private fun renderBanner(status: ServiceStatus, f: FitToDriveReport?, message: String?, running: Boolean, enabled: Boolean) = with(binding) {
         var action: (() -> Unit)? = null
+        var actionText = R.string.fit_start_sensing
+        val failed = SensingRepository.failedSms
         val (text, col) = when {
+            message != null && failed != null -> {
+                actionText = R.string.fit_alert_send_messages
+                action = {
+                    SensingRepository.clearFailedSms()
+                    launch(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(failed.first))).putExtra("sms_body", failed.second))
+                }
+                message to R.color.accent_amber
+            }
             message != null -> message to R.color.accent_amber
             status == ServiceStatus.STOPPED -> {
                 action = ::startSensing
@@ -474,7 +504,7 @@ class FitToDriveActivity : AppCompatActivity() {
         tvBanner.text = text
         tvBanner.setTextColor(color(col))
         btnBanner.visibility = if (action != null) View.VISIBLE else View.GONE
-        btnBanner.setText(R.string.fit_start_sensing)
+        btnBanner.setText(actionText)
         btnBanner.setOnClickListener { action?.invoke() }
     }
 
@@ -676,6 +706,7 @@ class FitToDriveActivity : AppCompatActivity() {
         cardCheck.visibility = if (ready) View.VISIBLE else View.GONE
         if (!ready) return@with
         val checking = f.checkSecondsLeft > 0f
+        tvBeforeHint.setText(checkHow(f, spoken = false))
         val adding = f.walkSession // recording another way of carrying, after set-up
         btnCheckNow.isEnabled = canAct && (adding || !f.waitingForWalk)
         btnCheckNow.setText(if (adding) R.string.fit_stop_recording else R.string.fit_check_now)
@@ -695,7 +726,8 @@ class FitToDriveActivity : AppCompatActivity() {
                     NotScoredReason.STILL_LEARNING -> R.string.fit_not_scored_learning
                     NotScoredReason.TOO_IRREGULAR -> R.string.fit_not_scored_irregular
                     NotScoredReason.POSITION_NOT_LEARNED -> R.string.fit_not_scored_position
-                    else -> R.string.fit_not_scored_no_walk
+                    // Check my walk: the walk after the tap, not "the last few minutes".
+                    else -> if (c.trigger == CheckTrigger.MANUAL) R.string.fit_not_scored_no_walk_check else R.string.fit_not_scored_no_walk
                 }),
                 "", if (c.notScored == NotScoredReason.TOO_IRREGULAR) R.color.accent_rose else R.color.text_muted)
             else -> {
@@ -727,7 +759,8 @@ class FitToDriveActivity : AppCompatActivity() {
             return@with
         }
         if (checking) {
-            tvLastLevel.text = getString(R.string.fit_checking, kotlin.math.ceil(f.checkSecondsLeft).toInt())
+            tvLastLevel.text = getString(if (f.checkExtended) R.string.fit_checking_more else R.string.fit_checking,
+                kotlin.math.ceil(f.checkSecondsLeft).toInt())
             tvLastLevel.setTextColor(color(R.color.text_main))
             levelDot.backgroundTintList = ColorStateList.valueOf(color(R.color.primary_glow))
             tvLastDetail.text = issueText(f) + "\n" +

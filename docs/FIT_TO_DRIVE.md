@@ -312,3 +312,18 @@ other 40 % is checked sober and with simulated impairment (x1.0).
 Limits: impairment is simulated; held-in-hand-and-looked-at walking is not in the dataset (it
 is detected from the screen and proximity sensor, not from motion); a bag swinging from the
 shoulder is not attached to the body and is less reliable.
+
+## v3.1: field-test fixes
+
+- **Check my walk no longer says "no walking" when you did walk.** Scoring needs about 16 s of steady
+  walking (3 segments of 8 s). Starting late or turning in a small room left less than that in the 30 s.
+  Now, if steps were counted (or you are still walking) and too little was measured, it says "keep
+  walking". It goes on for up to 90 s and scores as soon as there is enough. Standing still still
+  gives "no walking" at 30 s. The hint and the spoken prompt name the way you recorded (for example,
+  in the hand), not always the pocket.
+- **Contact alert SMS.** The phone answered "error 4" (no service on the SIM used) while texts from
+  Messages went out. The alert now tries every SIM: the default SMS SIM, then the calls SIM, the
+  mobile-data SIM, and all active SIMs (with the optional phone-state permission). A real alert
+  that finds no signal is tried again every 30 s, up to 4 more times. If it still fails, the screen says why in
+  plain words and shows **Send it from Messages**, with the alert already written in.
+- The location in the text had lost its space ("needed.Location"). Fixed.

@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Fit to drive, opt-in contact alert: a text message, with the location if allowed. -->
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Optional: lists the SIMs so the contact alert can try another one (dual SIM). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />

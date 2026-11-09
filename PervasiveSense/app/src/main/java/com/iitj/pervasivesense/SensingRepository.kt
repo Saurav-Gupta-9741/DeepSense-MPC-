@@ -66,6 +66,14 @@ object SensingRepository {
     internal fun setStatus(s: ServiceStatus) { _status.value = s }
     internal fun publish(s: SensingSnapshot) { _snapshot.value = s }
     internal fun setMessage(m: String?) { _message.value = m }
+
+    /** The contact alert that could not be texted (phone, text): the screen offers to send it from Messages. */
+    @Volatile var failedSms: Pair<String, String>? = null
+        private set
+    internal fun setFailedSms(s: Pair<String, String>?) { failedSms = s }
+
+    /** The user handled the failed alert (sent it from Messages): clear the banner. */
+    fun clearFailedSms() { failedSms = null; _message.value = null }
     internal fun setAlert(a: AlertCountdown?) { _alert.value = a }
 
     /**
