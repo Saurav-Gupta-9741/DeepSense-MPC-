@@ -473,8 +473,11 @@ class FitToDriveMonitor(
             onEvent(FitToDriveEvent.StateChanged)
             if (walkSessionActive) walkSessionProgress()
         }
-        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable, pos = pos, posDist = posDist,
-            certain = sessionPosition != null || viewing))
+        // Known, not guessed: the set-up walk's choice, held and looked at, or Check my walk with only one
+        // way recorded (the screen and voice then say to walk that way). Many phones' pocket sensor gives
+        // no answer until first covered, so "held" alone could miss a check done in the hand.
+        val certain = sessionPosition != null || viewing || (onRequest && learnedPositions().size == 1)
+        recent.addLast(Recent(seg, wall, learnedNow, learnable = learnable, pos = pos, posDist = posDist, certain = certain))
         onEvent(FitToDriveEvent.SegmentMeasured(seg, baseline.deviation(seg.values)?.distance ?: Float.NaN))
         val needed = if (practice != null) config.practiceWalkSegments else config.minWalkSegments
         // Check my walk, going on for more walking: enough now, score it on the next sample.

@@ -100,6 +100,23 @@ class FitToDrivePositionsTest {
     }
 
     @Test
+    fun withOnlyTheHandRecordedACheckIsInTheHandEvenIfThePocketSensorNeverAnswered() {
+        // Pocket sensor not yet answering (reads "not held"): the position cannot come from it. Only the
+        // hand is recorded and the check said "walk holding the phone": a wobbly walk is not "unfamiliar".
+        val m = monitor()
+        val t = record(m, CarryPosition.HAND, listOf(pocket1, pocket2), start, inPocket = false)
+        val wobble = pocket3.impaired(1.0).let { r -> Recording(r.t.copyOf(), Array(r.size) { i ->
+            val d = r.data[i]; FloatArray(6) { k -> if (k >= 3) 3f * d[k] else if (k == 0) d[k] * 1.8f else d[k] } }) }
+        val (c, t2) = check(m, wobble, t + gap, inPocket = true)
+        assertEquals(CarryPosition.HAND, c.position)
+        assertFalse(c.unfamiliarPosition)
+        assertTrue("${c.level} ${c.notScored}", c.level == WalkLevel.LARGE_GAP || c.notScored == NotScoredReason.TOO_IRREGULAR)
+        m.dismissAdvice()
+        val (n, _) = check(m, pocket3, t2, inPocket = true)
+        assertEquals(WalkLevel.NORMAL, n.level)
+    }
+
+    @Test
     fun aWobblyWalkThatMovesThePhoneDifferentlyIsStillCaughtInTheHand() {
         // Wobbling swings the held phone far more than a normal walk (here 3x the rotation and
         // sideways shake): by the motion alone it looks like another way of carrying.

@@ -335,3 +335,10 @@ and downgraded from **very different** to **a bit unusual**. Wobbling swings a h
 than a normal walk, so the motion alone looked like another way of carrying it. "Unfamiliar" now applies only
 when the position is guessed from the motion. Held and looked at (or chosen for the set-up walk), the
 position is certain and the walk gets its full result. The real-person accuracy per position is unchanged.
+
+## v3.3: one way recorded means the check knows the position
+
+Many phones' proximity sensor gives no reading until it is first covered, so "held and looked at" can
+be missed. Check my walk with only one way of carrying recorded now treats that way as known: the
+screen and voice tell the user to walk that way. A wobbly walk then gets its full result, never the
+"a way you haven't recorded" downgrade. The test for this fails without the fix and passes with it.
