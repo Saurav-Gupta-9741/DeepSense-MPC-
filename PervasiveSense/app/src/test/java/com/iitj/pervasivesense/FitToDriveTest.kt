@@ -662,6 +662,48 @@ class FitToDriveMonitorTest {
     }
 
     @Test
+    fun aSlightlyUnusualWalkThenErraticDrivingStillAlertsWithoutAReminder() {
+        // Walk "a bit unusual" (ignored), then the drive weaves: the contact is still alerted.
+        val m = monitor()
+        var t = feed(m, slightlyImpaired, learnNormal(m))
+        m.onTripStart(t)
+        assertEquals(WalkLevel.UNUSUAL, checks().last().level)
+        assertFalse(m.report().recentlyWarned) // not a warning: no reminder...
+        t = feed(m, drive(20.0) { 0.0 }, t, walking = false, inVehicle = true)
+        assertTrue(m.report().watchingDriving) // ...but the driving is watched
+        feed(m, weavingDrive(90.0), t, walking = false, inVehicle = true)
+        assertTrue(erratic().single().events.any { it.type == DrivingEventType.WEAVING })
+        assertTrue(reminders().isEmpty())
+    }
+
+    @Test
+    fun anUnusualWalkWatchSurvivesARestartAndANormalWalkEndsIt() {
+        val m = monitor()
+        val t = feed(m, slightlyImpaired, learnNormal(m))
+        m.onTripStart(t)
+        assertEquals(WalkLevel.UNUSUAL, checks().last().level)
+        val saved = m.exportState()
+        assertNotNull(saved.cautionWallMillis)
+        // Restarted 10 min later: an erratic drive is still reported.
+        val m2 = monitor()
+        m2.restore(saved)
+        var t2 = feed(m2, drive(20.0) { 0.0 }, t + 10 * oneMinute, walking = false, inVehicle = true)
+        feed(m2, weavingDrive(90.0), t2, walking = false, inVehicle = true)
+        assertEquals(1, erratic().size)
+        // Another restart, then a normal walk to the car: the watch ends.
+        val m3 = monitor()
+        m3.restore(saved)
+        t2 = feed(m3, Recording.constant(1.0, 0f, 0f, 9.81f), t + 2 * oneMinute, walking = false)
+        t2 = feed(m3, session3, t2 + sixMinutes)
+        m3.onTripStart(t2)
+        assertEquals(WalkLevel.NORMAL, checks().last().level)
+        assertNull(m3.exportState().cautionWallMillis)
+        t2 = feed(m3, drive(20.0) { 0.0 }, t2, walking = false, inVehicle = true)
+        feed(m3, weavingDrive(90.0, seed = 9), t2, walking = false, inVehicle = true)
+        assertEquals(1, erratic().size)
+    }
+
+    @Test
     fun aPracticeWarningNeverRemindsOrAlertsAndARealTripChecksAsUsual() {
         val m = monitor()
         var t = learnNormal(m)

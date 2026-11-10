@@ -360,3 +360,32 @@ screen and voice tell the user to walk that way. A wobbly walk then gets its ful
   first, and the message says how many SIMs were tried. If no SIM can text (on the test phone Messages
   could not send either), **Send on WhatsApp** sends the alert over the internet in one tap. It is on
   the screen and in the notification.
+
+## v3.5: the contact is also phoned; driving watched after an "unusual" walk; phone use is not "erratic"
+
+- **Call.** After the alert text, the phone calls the contact on speaker ("Also phone them", on by
+  default once the call permission is allowed). The call goes through Android's phone app, so it
+  works with the screen locked and the app in the background, and it can get through when a text
+  cannot. A dual-SIM phone set to "ask every time" uses the SIM that last sent a text. If the call
+  cannot be placed, a notification calls in one tap. The test alert calls too.
+- **An "unusual" walk ignored.** Before, only a "very different" walk (or a failed balance check)
+  armed the driving watch. Now a real "a bit unusual" walk also arms it for an hour, for erratic
+  driving only (weaving, jerky steering, harsh braking: countdown, then text and call). No reminder
+  is raised for it. A later normal walk or a passed balance check ends it; it survives a restart.
+- **Phone use while driving.** Picking the phone up and using it moved the phone like a swerve: in
+  the tests, 25 s of use three times made a calm drive "erratic". The hand tilts the phone fast
+  (over 1.5 rad/s) or far (over 55° from the slow "up"; braking at 1 g tilts the mean acceleration
+  only 45°), so nothing is judged while it is moved and for 3 s after. Picked up with the screen on, it
+  counts as in the hand until the screen goes off or it rests still for 10 s (put back in a holder).
+  Tests: the old rules call the phone use erratic, the new ones never do; a phone in a holder with
+  navigation on still catches weaving; hard braking right after the phone is put away and emergency
+  braking at 1 g are still caught.
+- **Location.** The fresh fix during the 30 s countdown now comes from the network and GPS at once
+  (the more accurate wins); an older fix says its age in the text.
+- **Screen locked.** Sensing already ran with the screen off (foreground service with a wake lock).
+  Now the app asks to be left out of battery optimisation (Samsung "sleeping apps" can stop it), and
+  sensing starts again after the phone restarts or the app is updated, if it was running.
+  After a restart the location is added again once the app is opened (Android does not let a
+  service started at boot use the location).
+- **Study mode** (labelled goggle sessions for research) is hidden. Long-press "How it works and
+  its limits" to show it; it shows by itself while a session is labelled.

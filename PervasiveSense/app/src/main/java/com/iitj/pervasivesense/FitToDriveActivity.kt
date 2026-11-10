@@ -1,12 +1,15 @@
 package com.iitj.pervasivesense
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
@@ -74,6 +77,16 @@ class FitToDriveActivity : AppCompatActivity() {
             setAlertContact(ok)
         }
 
+    /** Optional: the alert also phones the contact. */
+    private val callPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) Toast.makeText(this, R.string.fit_alert_need_call, Toast.LENGTH_LONG).show()
+            setAlertCall(granted)
+        }
+
+    /** Study mode (labelled goggle sessions) is for research only: hidden unless a session runs or asked for. */
+    private var studyShown = false
+
     /** Optional: lets the test alert try every SIM. Sent either way. */
     private val phoneStatePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> SensingRepository.sendTestAlert() }
@@ -105,6 +118,9 @@ class FitToDriveActivity : AppCompatActivity() {
             SensingForegroundService.hasBluetoothPermission(this)
         binding.switchAlertContact.isChecked = FitToDriveStore.alertContact(this) && ContactAlert.hasSmsPermission(this)
         binding.btnTestAlert.visibility = if (binding.switchAlertContact.isChecked) View.VISIBLE else View.GONE
+        binding.rowAlertCall.visibility = binding.btnTestAlert.visibility
+        binding.switchAlertCall.isChecked = FitToDriveStore.alertCall(this) && ContactAlert.hasCallPermission(this)
+        studyShown = FitToDriveStore.studyCondition(this) != StudyCondition.OFF
         binding.etContactName.setText(FitToDriveStore.contactName(this))
         binding.etContactPhone.setText(FitToDriveStore.contactPhone(this))
         binding.etParticipant.setText(FitToDriveStore.studyParticipant(this))
@@ -121,9 +137,21 @@ class FitToDriveActivity : AppCompatActivity() {
             }
         }
         binding.switchAlertContact.setOnCheckedChangeListener { _, on -> if (!bindingUi) onAlertToggled(on) }
+        binding.switchAlertCall.setOnCheckedChangeListener { _, on ->
+            if (bindingUi) return@setOnCheckedChangeListener
+            if (on && !ContactAlert.hasCallPermission(this)) callPermission.launch(Manifest.permission.CALL_PHONE)
+            else setAlertCall(on)
+        }
         binding.btnTestAlert.setOnClickListener {
+            askToRunInBackground()
             if (ContactAlert.hasPhoneStatePermission(this)) SensingRepository.sendTestAlert()
             else phoneStatePermission.launch(Manifest.permission.READ_PHONE_STATE)
+        }
+        // Research tools: long-press "How it works" to show or hide study mode.
+        binding.tvLimitsTitle.setOnLongClickListener {
+            studyShown = !studyShown
+            binding.cardStudy.visibility = if (studyShown && binding.cardSettings.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+            true
         }
         binding.btnAlertCancel.setOnClickListener { SensingRepository.cancelContactAlert() }
         binding.btnStep1.setOnClickListener {
@@ -281,7 +309,7 @@ class FitToDriveActivity : AppCompatActivity() {
                 setAlertContact(false)
             }
             else -> alertPermissions.launch(arrayOf(Manifest.permission.SEND_SMS, Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.CALL_PHONE))
         }
     }
 
@@ -289,9 +317,35 @@ class FitToDriveActivity : AppCompatActivity() {
         FitToDriveStore.setAlertContact(this, on)
         bindingUi = true
         binding.switchAlertContact.isChecked = on
+        binding.switchAlertCall.isChecked = FitToDriveStore.alertCall(this) && ContactAlert.hasCallPermission(this)
         bindingUi = false
         binding.btnTestAlert.visibility = if (on) View.VISIBLE else View.GONE
+        binding.rowAlertCall.visibility = binding.btnTestAlert.visibility
+        if (on) askToRunInBackground()
         SensingRepository.refreshFitSettings()
+    }
+
+    private fun setAlertCall(on: Boolean) {
+        FitToDriveStore.setAlertCall(this, on)
+        bindingUi = true
+        binding.switchAlertCall.isChecked = on && ContactAlert.hasCallPermission(this)
+        bindingUi = false
+    }
+
+    /**
+     * Battery optimisation (Samsung: "sleeping apps") can stop the watch while the screen is locked.
+     * Asks once per screen visit to leave PervasiveSense out of it.
+     */
+    private var askedBackground = false
+
+    @SuppressLint("BatteryLife") // a safety alert must run in the background; not a Play Store app
+    private fun askToRunInBackground() {
+        if (askedBackground) return
+        val pm = getSystemService(PowerManager::class.java) ?: return
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        askedBackground = true
+        Toast.makeText(this, R.string.fit_battery_hint, Toast.LENGTH_LONG).show()
+        launch(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
     }
 
     /** Sensing is stopped: start it here, or send the user to the dashboard for the permissions. */
@@ -373,7 +427,8 @@ class FitToDriveActivity : AppCompatActivity() {
 
     private fun showSettings(show: Boolean) = with(binding) {
         val v = if (show) View.VISIBLE else View.GONE
-        cardSettings.visibility = v; cardStudy.visibility = v; cardLimits.visibility = v
+        cardSettings.visibility = v; cardLimits.visibility = v
+        cardStudy.visibility = if (show && studyShown) View.VISIBLE else View.GONE
         btnSettingsToggle.setText(if (show) R.string.fit_settings_hide else R.string.fit_settings_show)
     }
 

@@ -11,12 +11,16 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.SystemClock
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.net.Uri
+import android.telecom.PhoneAccount
+import android.telecom.PhoneAccountHandle
+import android.telecom.TelecomManager
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
@@ -38,8 +42,9 @@ data class AlertCountdown(val kind: AlertKind, val secondsLeft: Int, val contact
  * warning". Always a countdown first ([COUNTDOWN_SEC], spoken, with a Cancel
  * button in the notification and on the screen), so a passenger or a false
  * alarm never reaches the contact. Then a text message from the user's own
- * phone, with the location if the user allowed it. At most one alert of each
- * kind per hour. Runs on the service's sensing thread ([handler]).
+ * phone, with the location if the user allowed it, then (if allowed) a phone
+ * call to the contact on speaker. At most one alert of each kind per hour.
+ * Runs on the service's sensing thread ([handler]).
  */
 class ContactAlert(
     private val context: Context,
@@ -84,6 +89,16 @@ class ContactAlert(
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         private const val LOCATION_MAX_AGE_MS = 15 * 60_000L
+        /** A fix this accurate (metres) ends the location search early. */
+        private const val LOCATION_GOOD_M = 50f
+        /** The call follows the text after this long (the text goes first: it carries the location). */
+        private const val CALL_DELAY_MS = 10_000L
+
+        fun hasCallPermission(c: Context) =
+            ContextCompat.checkSelfPermission(c, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+
+        /** Opted in to the call, allowed, and the phone can call. */
+        fun callsContact(c: Context) = FitToDriveStore.alertCall(c) && hasCallPermission(c) && canSendSms(c)
 
         fun hasSmsPermission(c: Context) =
             ContextCompat.checkSelfPermission(c, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
@@ -106,7 +121,10 @@ class ContactAlert(
     private var kind: AlertKind? = null
     private var deadline = 0L
     private var location: Location? = null
-    private var locationListener: LocationListener? = null
+    private var locationListeners: List<LocationListener> = emptyList()
+    private var callPhone = ""
+    private val sayCalling = Runnable { say(context.getString(R.string.fit_say_calling, contactName())) }
+    private val call = Runnable { placeCall(callPhone) }
     private val lastSent = HashMap<AlertKind, Long>()
     private val tick = Runnable { update() }
 
@@ -150,6 +168,8 @@ class ContactAlert(
 
     fun shutdown() {
         stop()
+        handler.removeCallbacks(sayCalling)
+        handler.removeCallbacks(call)
         notificationManager.cancel(NOTIFICATION_ID)
     }
 
@@ -181,9 +201,69 @@ class ContactAlert(
         if (loc != null) {
             text += context.getString(R.string.fit_sms_location,
                 String.format(Locale.US, "https://maps.google.com/?q=%.5f,%.5f", loc.latitude, loc.longitude))
+            val ageMin = ((System.currentTimeMillis() - loc.time) / 60_000L).toInt()
+            if (ageMin >= 2) text += context.getString(R.string.fit_sms_location_age, ageMin)
         }
-        deliver(k, FitToDriveStore.contactPhone(context), text, 0)
+        val phone = FitToDriveStore.contactPhone(context)
+        deliver(k, phone, text, 0)
+        // Then a call (a call can get through when a text cannot, and the contact hears the driver).
+        if (callsContact(context)) {
+            callPhone = phone
+            handler.removeCallbacks(sayCalling); handler.removeCallbacks(call)
+            handler.postDelayed(sayCalling, CALL_DELAY_MS - 4_000L)
+            handler.postDelayed(call, CALL_DELAY_MS)
+        }
     }
+
+    /**
+     * Calls the contact on speaker through Android's phone app (works with the screen locked and
+     * the app in the background: no screen of ours is opened). A dual-SIM phone set to "ask every
+     * time" would stop to ask, so a SIM is chosen then. On failure: a notification to call by hand.
+     */
+    @SuppressLint("MissingPermission") // checked
+    private fun placeCall(phone: String) {
+        if (!hasCallPermission(context) || phone.isBlank()) return
+        val number = phone.filter { it.isDigit() || it == '+' }
+        val ok = try {
+            val tm = context.getSystemService(TelecomManager::class.java) ?: throw IllegalStateException("no telecom")
+            val extras = Bundle().apply {
+                putBoolean(TelecomManager.EXTRA_START_CALL_WITH_SPEAKERPHONE, true)
+                callAccount(tm)?.let { putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
+            }
+            tm.placeCall(Uri.fromParts("tel", number, null), extras)
+            Log.i(TAG, "calling the contact")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "call failed", e)
+            false
+        }
+        if (ok) {
+            SensingRepository.setMessage(context.getString(R.string.fit_calling, contactName()))
+            return
+        }
+        val dial = PendingIntent.getActivity(context, 35,
+            Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        notificationManager.notify(NOTIFICATION_ID + 1, NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(context.getString(R.string.fit_call_failed, contactName()))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(dial)
+            .setAutoCancel(true)
+            .build())
+    }
+
+    /** Null: Android's default SIM for calls. With "ask every time", the SIM that last sent a text, else the first. */
+    @SuppressLint("MissingPermission") // needs READ_PHONE_STATE: without it, Android asks
+    private fun callAccount(tm: TelecomManager): PhoneAccountHandle? = runCatching {
+        if (tm.getDefaultOutgoingPhoneAccount(PhoneAccount.SCHEME_TEL) != null) return@runCatching null
+        val accounts = tm.callCapablePhoneAccounts
+        val sub = prefs.getInt(KEY_LAST_SUB, SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+        val byText = if (Build.VERSION.SDK_INT >= 31 && sub >= 0) runCatching {
+            context.getSystemService(TelephonyManager::class.java)?.createForSubscriptionId(sub)?.phoneAccountHandle
+        }.getOrNull() else null
+        byText?.takeIf { it in accounts } ?: accounts.firstOrNull()
+    }.getOrNull()
 
     /**
      * "Sent" only once the network confirms. Every SIM is tried; a real alert that finds no
@@ -385,25 +465,35 @@ class ContactAlert(
     }
 
     // ------------------------------------------------------------------ location (optional)
+    /** A fresh fix during the countdown, from the network (fast) and GPS (accurate): the more accurate one wins. */
     @SuppressLint("MissingPermission")
     private fun requestLocation() {
         if (!hasLocationPermission(context)) return
         val lm = context.getSystemService(LocationManager::class.java) ?: return
-        try {
-            val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
-                .firstOrNull { lm.isProviderEnabled(it) } ?: return
-            val listener = LocationListener { loc -> location = loc; stopLocation() }
-            locationListener = listener
-            lm.requestLocationUpdates(provider, 0L, 0f, listener, handler.looper)
-        } catch (e: Exception) {
-            Log.w(TAG, "location unavailable", e)
+        val listeners = ArrayList<LocationListener>()
+        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
+            try {
+                if (!lm.isProviderEnabled(provider)) continue
+                val listener = LocationListener { loc ->
+                    val best = location
+                    if (best == null || !best.hasAccuracy() || (loc.hasAccuracy() && loc.accuracy <= best.accuracy)) location = loc
+                    if (loc.hasAccuracy() && loc.accuracy <= LOCATION_GOOD_M) stopLocation()
+                }
+                lm.requestLocationUpdates(provider, 0L, 0f, listener, handler.looper)
+                listeners += listener
+            } catch (e: Exception) {
+                Log.w(TAG, "location from $provider unavailable", e)
+            }
         }
+        locationListeners = listeners
     }
 
     private fun stopLocation() {
-        val l = locationListener ?: return
-        locationListener = null
-        try { context.getSystemService(LocationManager::class.java)?.removeUpdates(l) } catch (e: Exception) { Log.w(TAG, "removeUpdates", e) }
+        val ls = locationListeners
+        if (ls.isEmpty()) return
+        locationListeners = emptyList()
+        val lm = context.getSystemService(LocationManager::class.java) ?: return
+        for (l in ls) try { lm.removeUpdates(l) } catch (e: Exception) { Log.w(TAG, "removeUpdates", e) }
     }
 
     @SuppressLint("MissingPermission")

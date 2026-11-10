@@ -29,6 +29,10 @@ object FitToDriveStore {
     fun alertContact(c: Context) = prefs(c).getBoolean("alert_contact", false)
     fun setAlertContact(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alert_contact", on).apply()
 
+    /** With the contact alert: also phone the contact after the text (needs the call permission). On by default. */
+    fun alertCall(c: Context) = prefs(c).getBoolean("alert_call", true)
+    fun setAlertCall(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alert_call", on).apply()
+
     /** Set-up step 3 (trusted contact) skipped. */
     fun contactSkipped(c: Context) = prefs(c).getBoolean("contact_skipped", false)
     fun setContactSkipped(c: Context, on: Boolean) = prefs(c).edit().putBoolean("contact_skipped", on).apply()
@@ -59,6 +63,7 @@ object FitToDriveStore {
         for (r in s.balanceReferences) balance.put(JSONArray().put(r.wallMillis).put(num(r.swayAccel)).put(num(r.swayGyro)))
         val o = JSONObject().put("version", 1).put("baseline", baseline).put("balance", balance)
         s.warnedWallMillis?.let { o.put("warned", it) }
+        s.cautionWallMillis?.let { o.put("caution", it) }
         if (s.advice != FitAdvice.NONE && s.adviceWallMillis != null) o.put("advice", s.advice.name).put("advice_at", s.adviceWallMillis)
         val json = o.toString()
 
@@ -94,7 +99,8 @@ object FitToDriveStore {
         FitToDriveState(baseline, refs,
             warnedWallMillis = if (o.has("warned")) o.getLong("warned") else null,
             advice = advice,
-            adviceWallMillis = if (o.has("advice_at")) o.getLong("advice_at") else null)
+            adviceWallMillis = if (o.has("advice_at")) o.getLong("advice_at") else null,
+            cautionWallMillis = if (o.has("caution")) o.getLong("caution") else null)
     } catch (e: java.io.FileNotFoundException) {
         null
     } catch (e: Exception) {

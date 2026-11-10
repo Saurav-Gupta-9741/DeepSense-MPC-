@@ -919,6 +919,42 @@
                             android:contentDescription="@string/fit_alert_switch" />
                     </LinearLayout>
 
+                    <LinearLayout
+                        android:id="@+id/rowAlertCall"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/fit_alert_call_switch"
+                                android:textColor="@color/text_main"
+                                android:textSize="14sp" />
+
+                            <TextView
+                                style="@style/PS.Caption"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/fit_alert_call_hint" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchAlertCall"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="@string/fit_alert_call_switch" />
+                    </LinearLayout>
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnTestAlert"
                         style="@style/Widget.Material3.Button.OutlinedButton"
@@ -1091,6 +1127,7 @@
                     android:padding="16dp">
 
                     <TextView
+                        android:id="@+id/tvLimitsTitle"
                         style="@style/PS.CardTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"

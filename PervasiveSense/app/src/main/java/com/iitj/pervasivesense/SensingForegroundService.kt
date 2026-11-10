@@ -63,6 +63,16 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
                 PackageManager.PERMISSION_GRANTED
 
+        private const val SERVICE_PREFS = "pervasivesense_service"
+        private const val KEY_RUNNING = "running"
+
+        /** Sensing was on (not stopped by the user): restarted after a reboot or an app update. */
+        fun wasRunning(context: Context) =
+            context.getSharedPreferences(SERVICE_PREFS, Context.MODE_PRIVATE).getBoolean(KEY_RUNNING, false)
+
+        private fun setRunning(context: Context, on: Boolean) =
+            context.getSharedPreferences(SERVICE_PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_RUNNING, on).apply()
+
         /** Needed to see car Bluetooth connections (runtime permission on Android 12+). */
         fun hasBluetoothPermission(context: Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
@@ -147,6 +157,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            setRunning(this, false) // stopped by the user: not restarted after a reboot
             stopSelf()
             return START_NOT_STICKY
         }
@@ -170,6 +181,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             return START_NOT_STICKY
         }
         started = true
+        setRunning(this, true)
         SensingRepository.setMessage(null)
         handler.post { startSensing() }
         return START_STICKY

@@ -283,7 +283,7 @@ class SensingEngine(
         val modelWalking = context == "WALKING"
         fitToDrive.processSample(t, s, walking = modelWalking || stepping, hasGyro = resampler.hasGyroData,
             inPocket = !proximityAvailable || !proximitySeenNear || proximityNear || !screenOn, inVehicle = inVehicle,
-            stepsOnly = !modelWalking && stepping, steps = newSteps)
+            stepsOnly = !modelWalking && stepping, steps = newSteps, screenOn = screenOn)
 
         samplesSinceInference++
         val stride = if (ecoMode) config.ecoStrideSamples else config.liveStrideSamples

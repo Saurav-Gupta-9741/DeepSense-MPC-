@@ -118,7 +118,7 @@ data class FitToDriveReport(
     val practice: PracticeWalk?,
     /** A real warning (large gap or failed balance) in the last hour that a passed balance check has not cleared. */
     val recentlyWarned: Boolean,
-    /** In a vehicle after such a warning, not confirmed as a passenger: the driving is watched. */
+    /** In a vehicle after such a warning or an unusual walk, not confirmed as a passenger: the driving is watched. */
     val watchingDriving: Boolean,
     val lastCheck: WalkCheck?,
     val balanceRunning: Boolean,
@@ -164,7 +164,9 @@ class FitToDriveState(
     val warnedWallMillis: Long? = null,
     /** A real warning still showing (TAKE_BALANCE_CHECK / DONT_DRIVE) and when it was given. */
     val advice: FitAdvice = FitAdvice.NONE,
-    val adviceWallMillis: Long? = null
+    val adviceWallMillis: Long? = null,
+    /** Wall time of the last real "a bit unusual" walk (the 1-hour erratic-driving watch); null if none. */
+    val cautionWallMillis: Long? = null
 )
 
 /**
@@ -292,6 +294,11 @@ class FitToDriveMonitor(
     private var checkExtended = false
     /** Time of the last real warning (not from a practice test); cleared by a passed balance check. */
     private var warnedT = Long.MIN_VALUE
+    /**
+     * Time of the last real "a bit unusual" walk: no reminder, but for an hour erratic driving (weaving,
+     * jerks, harsh braking) still alerts the contact. Cleared by a later normal walk or a passed balance check.
+     */
+    private var cautionT = Long.MIN_VALUE
     private var lastReminderT = Long.MIN_VALUE
     private var lastErraticT = Long.MIN_VALUE
     private var passengerConfirmed = false
@@ -338,14 +345,17 @@ class FitToDriveMonitor(
     private fun recentlyWarned(t: Long) =
         enabled && warnedT != Long.MIN_VALUE && t - warnedT <= secs(config.watchAfterWarningSec)
 
-    /** Warned within the hour and not confirmed as a passenger on this trip. */
-    private fun drivingArmed(t: Long) = recentlyWarned(t) && !passengerConfirmed
+    private fun recentlyCautioned(t: Long) =
+        enabled && cautionT != Long.MIN_VALUE && t - cautionT <= secs(config.watchAfterWarningSec)
+
+    /** Warned (or an unusual walk) within the hour and not confirmed as a passenger on this trip. */
+    private fun drivingArmed(t: Long) = (recentlyWarned(t) || recentlyCautioned(t)) && !passengerConfirmed
 
     fun setEnabled(on: Boolean) {
         if (on == enabled) return
         enabled = on
         extractor.reset(); recent.clear(); waitUntil = Long.MIN_VALUE; practice = null
-        if (!on) { advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cancelBalanceTest(); stopWalkRecording() }
+        if (!on) { advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cautionT = Long.MIN_VALUE; cancelBalanceTest(); stopWalkRecording() }
     }
 
     /** Status of the learned walk in use ([current] position). */
@@ -394,7 +404,7 @@ class FitToDriveMonitor(
      * [inVehicle]: a trip is in progress; after a warning the driving is watched.
      */
     fun processSample(t: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean, inPocket: Boolean = true,
-                      inVehicle: Boolean = false, stepsOnly: Boolean = false, steps: Int = 0) {
+                      inVehicle: Boolean = false, stepsOnly: Boolean = false, steps: Int = 0, screenOn: Boolean = false) {
         lastT = t
         if (walking && stepsOnly) stepsOnlyT = t
         restoredWarning?.let { applyRestoredWarning(t, it) }
@@ -403,7 +413,7 @@ class FitToDriveMonitor(
             advice = FitAdvice.NONE
         }
         if (!enabled) return
-        watchDriving(t, s, hasGyro, inVehicle)
+        watchDriving(t, s, hasGyro, inVehicle, screenOn)
         if (walkSessionActive) walkSessionClock(t)
         walkingNow = walking
         inPocketNow = inPocket
@@ -674,25 +684,26 @@ class FitToDriveMonitor(
 
     fun resetLearning() {
         baselines.values.forEach { it.clear() }; references.clear(); recent.clear(); cancelPractice(); stopWalkRecording()
-        lastCheck = null; lastBalance = null; advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE
+        lastCheck = null; lastBalance = null; advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cautionT = Long.MIN_VALUE
         practiceAdvice = false; restoredWarning = null
         onEvent(FitToDriveEvent.StateChanged)
     }
 
     fun exportState(): FitToDriveState {
         val all = baselines.values.flatMap { it.snapshot() }
-        restoredWarning?.let { return FitToDriveState(all, references.toList(), it.warnedWallMillis, it.advice, it.adviceWallMillis) }
+        restoredWarning?.let { return FitToDriveState(all, references.toList(), it.warnedWallMillis, it.advice, it.adviceWallMillis, it.cautionWallMillis) }
         val realAdvice = if (warningActive && !practiceAdvice && adviceT != Long.MIN_VALUE) advice else FitAdvice.NONE
         return FitToDriveState(all, references.toList(),
             warnedWallMillis = if (warnedT != Long.MIN_VALUE) wallClockOf(warnedT) else null,
             advice = realAdvice,
-            adviceWallMillis = if (realAdvice != FitAdvice.NONE) wallClockOf(adviceT) else null)
+            adviceWallMillis = if (realAdvice != FitAdvice.NONE) wallClockOf(adviceT) else null,
+            cautionWallMillis = if (cautionT != Long.MIN_VALUE) wallClockOf(cautionT) else null)
     }
 
     fun restore(state: FitToDriveState) {
         for ((p, b) in baselines) b.restore(state.baseline.filter { it.position == p })
         references.clear(); references.addAll(state.balanceReferences.takeLast(config.balanceReferences))
-        restoredWarning = if (state.warnedWallMillis != null || state.advice != FitAdvice.NONE) state else null
+        restoredWarning = if (state.warnedWallMillis != null || state.advice != FitAdvice.NONE || state.cautionWallMillis != null) state else null
     }
 
     /** A restart (app killed, phone rebooted) keeps a warning given before it, for the rest of its hour. */
@@ -702,6 +713,9 @@ class FitToDriveMonitor(
         fun sensorTimeOf(wall: Long) = t - (now - wall) * 1_000_000L
         s.warnedWallMillis?.let { w ->
             if (now - w in 0..(config.watchAfterWarningSec * 1000).toLong()) warnedT = sensorTimeOf(w)
+        }
+        s.cautionWallMillis?.let { w ->
+            if (now - w in 0..(config.watchAfterWarningSec * 1000).toLong()) cautionT = sensorTimeOf(w)
         }
         val aw = s.adviceWallMillis
         if (s.advice != FitAdvice.NONE && aw != null && now - aw in 0..(config.adviceExpirySec * 1000).toLong()) {
@@ -772,14 +786,14 @@ class FitToDriveMonitor(
     }
 
     /** In a vehicle: track the driving; after a warning, report erratic driving (at most every 10 min). */
-    private fun watchDriving(t: Long, s: FloatArray, hasGyro: Boolean, inVehicle: Boolean) {
+    private fun watchDriving(t: Long, s: FloatArray, hasGyro: Boolean, inVehicle: Boolean, screenOn: Boolean) {
         if (!inVehicle) {
             if (inVehicleNow) drivingWatch.reset() // a stop within the trip: keep the events seen so far
             inVehicleNow = false
             return
         }
         inVehicleNow = true
-        val e = drivingWatch.processSample(t, s, hasGyro) ?: return
+        val e = drivingWatch.processSample(t, s, hasGyro, screenOn) ?: return
         if (!drivingArmed(t) || !drivingWatch.erratic(t)) return
         if (lastErraticT != Long.MIN_VALUE && t - lastErraticT < secs(config.erraticCooldownSec)) return
         lastErraticT = t
@@ -896,8 +910,13 @@ class FitToDriveMonitor(
             .take(3)
         when (level) {
             // Only a normal walk becomes part of "normal" (a practice walk never does).
-            WalkLevel.NORMAL -> if (p == null && !onRequest) learnAll(pending)
-            WalkLevel.UNUSUAL ->
+            WalkLevel.NORMAL -> if (p == null) {
+                if (!onRequest) learnAll(pending)
+                if (cautionT != Long.MIN_VALUE) { cautionT = Long.MIN_VALUE; onEvent(FitToDriveEvent.StateChanged) }
+            }
+            WalkLevel.UNUSUAL -> {
+                // A real unusual walk: erratic driving in the next hour still alerts the contact.
+                if (p == null) { cautionT = t; onEvent(FitToDriveEvent.StateChanged) }
                 // Before driving, a slightly unusual walk is worth a balance check, as an offer.
                 // Already moving (trip detected late): no prompt for a mild case.
                 if (trigger != CheckTrigger.TRIP_START && (advice == FitAdvice.NONE || advice == FitAdvice.BALANCE_OK)) {
@@ -905,6 +924,7 @@ class FitToDriveMonitor(
                     adviceT = t
                     practiceAdvice = p != null
                 }
+            }
             WalkLevel.LARGE_GAP -> {
                 advice = FitAdvice.TAKE_BALANCE_CHECK
                 adviceT = t
@@ -970,7 +990,7 @@ class FitToDriveMonitor(
             // Still practice: the test C itself, or a check after a practice warning that did not fail.
             practiceAdvice = practiceBalance || (practiceAdvice && outcome != BalanceOutcome.FAILED)
             when {
-                advice == FitAdvice.BALANCE_OK -> warnedT = Long.MIN_VALUE // normal balance: all clear
+                advice == FitAdvice.BALANCE_OK -> { warnedT = Long.MIN_VALUE; cautionT = Long.MIN_VALUE } // normal balance: all clear
                 advice == FitAdvice.DONT_DRIVE && !practiceAdvice -> warnedT = t
             }
             onEvent(FitToDriveEvent.StateChanged)

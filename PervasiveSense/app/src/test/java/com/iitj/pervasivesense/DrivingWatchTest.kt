@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Random
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.sin
 
 /**
@@ -62,14 +63,107 @@ fun weavingDrive(seconds: Double = 60.0, peak: Double = 0.09, hz: Double = 0.2, 
 
 class DrivingWatchTest {
 
-    private fun run(w: DrivingWatch, rec: Recording, t0: Long = 0L, hasGyro: Boolean = true): List<DrivingEvent> {
+    private fun run(w: DrivingWatch, rec: Recording, t0: Long = 0L, hasGyro: Boolean = true,
+                    screen: (Double) -> Boolean = { false }): List<DrivingEvent> {
         val out = ArrayList<DrivingEvent>()
         val s = FloatArray(6)
         for (i in 0 until rec.size) {
             rec.data[i].copyInto(s)
-            w.processSample(t0 + rec.t[i], s, hasGyro)?.let { out += it }
+            w.processSample(t0 + rec.t[i], s, hasGyro, screen(rec.t[i] / 1e9))?.let { out += it }
         }
         return out
+    }
+
+    /**
+     * The driver picks the phone up at [from] s (tilting it 80° in 0.6 s), uses it in the hand until
+     * [to] s (the hand turns it ±0.3 rad/s and shakes it), then puts it back as it was.
+     */
+    private fun pickedUp(base: Recording, from: Double, to: Double) = Recording(base.t.copyOf(), Array(base.size) { i ->
+        val ts = base.t[i] / 1e9
+        val lift = when {
+            ts < from || ts > to + 0.6 -> 0.0
+            ts < from + 0.6 -> (ts - from) / 0.6
+            ts <= to -> 1.0
+            else -> 1.0 - (ts - to) / 0.6
+        }
+        val rate = when {
+            ts in from..(from + 0.6) -> Math.toRadians(80.0) / 0.6
+            ts in to..(to + 0.6) -> -Math.toRadians(80.0) / 0.6
+            else -> 0.0
+        }
+        val a = Math.toRadians(80.0 * lift)
+        val c = cos(a).toFloat(); val sn = sin(a).toFloat()
+        val d = base.data[i]
+        val j = if (ts in from..(to + 0.6)) 1.0 else 0.0
+        floatArrayOf(
+            (d[0] + j * 1.5 * sin(2 * PI * 1.3 * ts)).toFloat(),
+            c * d[1] - sn * d[2] + (j * 1.2 * sin(2 * PI * 0.8 * ts + 1)).toFloat(),
+            sn * d[1] + c * d[2],
+            (d[3] + rate + j * 0.25 * sin(2 * PI * 0.7 * ts)).toFloat(),
+            c * d[4] - sn * d[5] + (j * 0.25 * sin(2 * PI * 1.1 * ts + 1)).toFloat(),
+            sn * d[4] + c * d[5] + (j * 0.35 * sin(2 * PI * 0.9 * ts + 2)).toFloat())
+    })
+
+    /** The hand check switched off: how it was before v3.5. */
+    private fun withoutHandCheck() = DrivingWatch(DrivingWatch.Config(handlingRadS = Float.MAX_VALUE, handlingTiltDeg = 181f))
+
+    @Test
+    fun usingThePhoneWhileDrivingCalmlyIsNotErratic() {
+        // Calm straight driving; the phone is picked up and used for 25 s, three times in 5 minutes.
+        var rec = drive(300.0, seed = 30) { 0.0 }
+        val uses = listOf(40.0, 130.0, 220.0)
+        for (from in uses) rec = pickedUp(rec, from, from + 25.0)
+        val screen = { ts: Double -> uses.any { ts in it..(it + 26.0) } }
+
+        val before = withoutHandCheck()
+        val old = run(before, rec, screen = screen)
+        assertTrue("the hand made driving events before: ${old.map { it.type }}", before.erratic(rec.t.last()))
+
+        val w = DrivingWatch()
+        val events = run(w, rec, screen = screen)
+        assertTrue(events.map { "${it.type}@${it.tNanos / 1_000_000_000}s" }.toString(), events.isEmpty())
+        assertFalse(w.erratic(rec.t.last()))
+    }
+
+    @Test
+    fun movingThePhoneInThePocketWithTheScreenOffIsNotErratic() {
+        // Screen off: the driver shifts in the seat and the phone turns over and back, three times.
+        var rec = drive(300.0, seed = 33) { 0.0 }
+        for (from in listOf(40.0, 130.0, 220.0)) rec = pickedUp(rec, from, from + 8.0)
+        val w = DrivingWatch()
+        val events = run(w, rec)
+        assertFalse(events.map { "${it.type}@${it.tNanos / 1_000_000_000}s" }.toString(), w.erratic(rec.t.last()))
+    }
+
+    @Test
+    fun aPhoneInAHolderWithTheScreenOnIsStillWatched() {
+        // Navigation on all the time; the phone is taken out of the holder at 10 s and put back at 20 s.
+        val rec = pickedUp(Recording.concat(drive(40.0, seed = 31) { 0.0 }, weavingDrive(seed = 32)), 10.0, 20.0)
+        val w = DrivingWatch()
+        val events = run(w, rec, screen = { true })
+        assertTrue(events.map { it.type }.toString(), events.any { it.type == DrivingEventType.WEAVING })
+        assertTrue(w.erratic(rec.t.last()))
+    }
+
+    @Test
+    fun hardBrakingRightAfterThePhoneWasPutDownIsStillSeen() {
+        // Used until 30 s, screen off at 31 s; three hard brakes later.
+        var rec = drive(150.0, seed = 34, fwd = { ts -> -bump(ts, 50.0, 2.0, 6.5) - bump(ts, 80.0, 2.0, 6.5) - bump(ts, 110.0, 2.0, 6.5) }) { 0.0 }
+        rec = pickedUp(rec, 10.0, 30.0)
+        val w = DrivingWatch()
+        val events = run(w, rec, screen = { it in 10.0..31.0 })
+        assertEquals(events.map { it.type }.toString(), 3, events.count { it.type == DrivingEventType.HARSH_BRAKING })
+        assertTrue(w.erratic(rec.t.last()))
+    }
+
+    @Test
+    fun emergencyBrakingAtOneGIsNotMistakenForThePhoneBeingMoved() {
+        for ((k, r) in rotations.withIndex()) {
+            val rec = drive(60.0, seed = 35 + k, fwd = { ts -> -bump(ts, 30.0, 2.5, 9.5) }) { 0.0 }.rotated(r)
+            val w = DrivingWatch()
+            val events = run(w, rec)
+            assertTrue("rotation $k: ${events.map { it.type }}", events.any { it.type == DrivingEventType.HARSH_BRAKING })
+        }
     }
 
     private val rotations = listOf(

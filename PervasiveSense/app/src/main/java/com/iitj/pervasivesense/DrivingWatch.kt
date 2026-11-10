@@ -30,6 +30,11 @@ class DrivingEvent(val tNanos: Long, val type: DrivingEventType, val magnitude: 
  * [erratic]: a weaving episode, or [Config.eventsForErratic] jerky/harsh events
  * within [Config.eventsWindowSec].
  *
+ * The phone moved by hand (picked up, put down, used while driving) moves on its own,
+ * so nothing is judged then ([handled]): a hand tilts the phone fast or far, a car only
+ * turns it about the vertical. Picked up with the screen on, it counts as in the hand
+ * until the screen goes off or it rests still (put in a holder) for [Config.restingSec].
+ *
  * Limits: weaving inside one lane at highway speed turns the car too little to
  * be seen; a phone in a trouser pocket also moves with the driver's leg. It
  * therefore only acts after a fit-to-drive warning, and an alert always has a
@@ -44,7 +49,17 @@ class DrivingWatch(val config: Config = Config()) {
         val harshMs2: Float = 4f,
         val eventsForErratic: Int = 3,
         val eventsWindowSec: Float = 300f,
-        val cooldownSec: Float = 3f
+        val cooldownSec: Float = 3f,
+        /** The phone tilting this fast (rad/s, 0.25 s mean) is a hand moving it: a car pitches and rolls far slower. */
+        val handlingRadS: Float = 1.5f,
+        /** ...or its 0.5 s mean direction this far (degrees) from the slow "up": braking at 1 g tilts it only 45°. */
+        val handlingTiltDeg: Float = 55f,
+        /** Nothing is judged for this long after the phone was moved (its new orientation settles first). */
+        val handlingGraceSec: Float = 3f,
+        /** Picked up with the screen on: in the hand until it tilts less than this (rad/s, 3 s mean)... */
+        val restingRadS: Float = 0.15f,
+        /** ...for this long (put in a holder), or the screen goes off. */
+        val restingSec: Float = 10f
     )
 
     private val dt = 0.02f
@@ -55,6 +70,8 @@ class DrivingWatch(val config: Config = Config()) {
     private val aMean = alpha(0.5f)
     private val aG0 = alpha(60f)
     private val aUp = alpha(20f)
+    private val aRest = alpha(3f)
+    private val cosHandling = kotlin.math.cos(Math.toRadians(config.handlingTiltDeg.toDouble())).toFloat()
 
     private val g = FloatArray(3)
     /** Slow "up" direction (20 s): splits the acceleration into vertical (bumps) and horizontal (braking). */
@@ -75,6 +92,21 @@ class DrivingWatch(val config: Config = Config()) {
     private var lastJerkT = Long.MIN_VALUE
     private var lastHarshT = Long.MIN_VALUE
 
+    // Phone handling: own filters, never reset while the phone is being moved.
+    private val hg = FloatArray(3)
+    private val hMean = FloatArray(3)
+    private val hUp = FloatArray(3)
+    private var hSamples = 0
+    private var tiltFast = 0f
+    private var tiltRest = 0f
+    private var handledT = Long.MIN_VALUE
+    private var inHand = false
+    private var restingSince = Long.MIN_VALUE
+
+    /** The phone is in the hand or was just moved by hand: the car's motion cannot be read from it. */
+    var handledNow = false
+        private set
+
     /** True while the last [Config.eventsWindowSec] contain a weaving episode or enough jerky/harsh events. */
     fun erratic(t: Long): Boolean {
         prune(t)
@@ -93,10 +125,19 @@ class DrivingWatch(val config: Config = Config()) {
     }
 
     /** Forgets the events too (a new trip). */
-    fun clear() { reset(); events.clear() }
+    fun clear() {
+        reset(); events.clear()
+        hSamples = 0; tiltFast = 0f; tiltRest = 0f; handledT = Long.MIN_VALUE; inHand = false
+        restingSince = Long.MIN_VALUE; handledNow = false
+    }
 
-    /** One 50 Hz sample in a vehicle; returns an event when one is detected. */
-    fun processSample(t: Long, s: FloatArray, hasGyro: Boolean): DrivingEvent? {
+    /**
+     * One 50 Hz sample in a vehicle; returns an event when one is detected. [screenOn]: a phone
+     * picked up with the screen on is being used, until the screen goes off or it rests still.
+     */
+    fun processSample(t: Long, s: FloatArray, hasGyro: Boolean, screenOn: Boolean = false): DrivingEvent? {
+        handledNow = handled(t, s, hasGyro, screenOn)
+        if (handledNow) { reset(); return null } // judged again from a fresh start once it settles
         if (!started) {
             g[0] = s[0]; g[1] = s[1]; g[2] = s[2]
             mean[0] = s[0]; mean[1] = s[1]; mean[2] = s[2]
@@ -142,6 +183,52 @@ class DrivingWatch(val config: Config = Config()) {
         }
         if (event != null) events.addLast(event)
         return event
+    }
+
+    private fun secs(s: Float) = (s * 1e9f).toLong()
+
+    /**
+     * Picked up, put down or used: the hand tilts the phone fast (gyroscope) or far from the
+     * slow "up" (no gyroscope needed). A car only turns it about the vertical, slowly pitches and
+     * rolls it, and braking at 1 g tilts the mean acceleration by 45°.
+     */
+    private fun handled(t: Long, s: FloatArray, hasGyro: Boolean, screenOn: Boolean): Boolean {
+        if (hSamples++ == 0) {
+            for (i in 0 until 3) { hg[i] = s[i]; hMean[i] = s[i]; hUp[i] = s[i] }
+            return false
+        }
+        for (i in 0 until 3) {
+            hg[i] += aGravity * (s[i] - hg[i])
+            hMean[i] += aMean * (s[i] - hMean[i])
+            hUp[i] += aUp * (s[i] - hUp[i])
+        }
+        var moved = false
+        val gn = sqrt(hg[0] * hg[0] + hg[1] * hg[1] + hg[2] * hg[2])
+        if (hasGyro && gn >= 1f) {
+            val along = (s[3] * hg[0] + s[4] * hg[1] + s[5] * hg[2]) / gn
+            val tilt = sqrt(maxOf(0f, s[3] * s[3] + s[4] * s[4] + s[5] * s[5] - along * along))
+            tiltFast += aFast * (tilt - tiltFast)
+            tiltRest += aRest * (tilt - tiltRest)
+            if (tiltFast >= config.handlingRadS) moved = true
+        }
+        val upN = sqrt(hUp[0] * hUp[0] + hUp[1] * hUp[1] + hUp[2] * hUp[2])
+        val mN = sqrt(hMean[0] * hMean[0] + hMean[1] * hMean[1] + hMean[2] * hMean[2])
+        if (hSamples > 150 && upN > 1f && mN > 1f &&
+            (hMean[0] * hUp[0] + hMean[1] * hUp[1] + hMean[2] * hUp[2]) / (upN * mN) < cosHandling) moved = true
+        if (moved) {
+            handledT = t
+            if (screenOn) { inHand = true; restingSince = Long.MIN_VALUE }
+        }
+        if (inHand) {
+            // Without a gyroscope: in the hand until the screen goes off.
+            val resting = hasGyro && !moved && tiltRest < config.restingRadS
+            restingSince = if (!resting) Long.MIN_VALUE else if (restingSince == Long.MIN_VALUE) t else restingSince
+            if (!screenOn || (restingSince != Long.MIN_VALUE && t - restingSince >= secs(config.restingSec))) {
+                inHand = false
+                handledT = t // settles from now
+            }
+        }
+        return inHand || (handledT != Long.MIN_VALUE && t - handledT < secs(config.handlingGraceSec))
     }
 
     private fun cooledDown(t: Long, last: Long) =

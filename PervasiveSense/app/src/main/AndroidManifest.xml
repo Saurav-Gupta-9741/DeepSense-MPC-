@@ -21,6 +21,12 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Fit to drive, opt-in contact alert: a text message, with the location if allowed. -->
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Optional: after the text, phone the contact on speaker. -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Sensing restarts after the phone restarts or the app is updated, if it was running. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Asks to be left out of battery optimisation, so the watch keeps running with the screen locked. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Optional: lists the SIMs so the contact alert can try another one (dual SIM). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -74,6 +80,16 @@
         <receiver
             android:name=".VehicleActivityReceiver"
             android:exported="false" />
+
+        <!-- Restarts sensing after a reboot or an app update (only if it was running). -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
