@@ -287,7 +287,12 @@
     <string name="fit_alert_sent">Alert sent to %1$s at %2$s</string>
     <string name="fit_alert_failed">Could not text %1$s at %2$s: %3$s</string>
     <string name="fit_alert_send_messages">Send it from Messages</string>
-    <string name="fit_sms_err_no_service">the phone had no mobile signal for texts (error 4). It tried every SIM.</string>
+    <string name="fit_sms_err_no_service">your SIM cannot send texts right now (no SMS service, error 4). If Messages cannot send a normal SMS either, check that VoLTE is on and your plan includes SMS.</string>
+    <string name="fit_alert_send_whatsapp">Send on WhatsApp</string>
+    <plurals name="fit_sims_tried">
+        <item quantity="one">(%1$d SIM tried)</item>
+        <item quantity="other">(%1$d SIMs tried)</item>
+    </plurals>
     <string name="fit_sms_err_radio_off">mobile network is off (airplane mode?)</string>
     <string name="fit_sms_err_refused">the network refused the text (no SMS balance or pack?)</string>
     <string name="fit_sms_err_limit">too many texts sent in a short time</string>

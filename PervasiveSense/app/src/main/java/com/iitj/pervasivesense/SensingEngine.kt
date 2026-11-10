@@ -264,7 +264,9 @@ class SensingEngine(
         while (stepTimes.isNotEmpty() && t - stepTimes.first() > 3_000_000_000L) stepTimes.removeFirst()
         if (!hardwareSteps && !inVehicle) wellness.onSteps(newSteps)
 
-        val fallConfirmed = fall.processSample(t, ax, ay, az)
+        // Held and looked at (screen on, uncovered, or this app on screen): an impact is the phone being put down.
+        val held = screenOn && (uiVisible || (proximityAvailable && proximitySeenNear && !proximityNear))
+        val fallConfirmed = fall.processSample(t, ax, ay, az, held)
         if (fallConfirmed) wellness.onFallEvent()
 
         // Fit-to-drive: score the walk that led up to a trip as soon as the trip is detected.

@@ -505,6 +505,13 @@ class FitToDriveActivity : AppCompatActivity() {
         tvBanner.setTextColor(color(col))
         btnBanner.visibility = if (action != null) View.VISIBLE else View.GONE
         btnBanner.setText(actionText)
+        // The SIM could not text: WhatsApp goes over the internet.
+        btnBanner2.visibility = if (failed != null && message != null) View.VISIBLE else View.GONE
+        btnBanner2.setOnClickListener {
+            val sms = SensingRepository.failedSms ?: return@setOnClickListener
+            SensingRepository.clearFailedSms()
+            launch(ContactAlert.whatsAppIntent(this@FitToDriveActivity, sms.first, sms.second))
+        }
         btnBanner.setOnClickListener { action?.invoke() }
     }
 

@@ -12,9 +12,16 @@ enum class FallState {
 /**
  * Multi-phase fall detector (threshold + posture-change + inactivity model).
  *
- *  1. Pre-impact: a low-g phase (|a| < [freeFallG]) within [freeFallLookbackSec]
- *     before the impact - the body/phone accelerates toward the ground.
- *  2. Impact: |a| > [impactG].
+ *  1. Pre-impact: a low-g phase within [freeFallLookbackSec] before the impact - the
+ *     body/phone accelerates toward the ground: at least [minLowGSamples] samples
+ *     below [lowG] (≈ 0.1 s), one of them below [freeFallG]. Moving the phone by
+ *     hand dips for a moment only.
+ *  2. Impact: |a| > [impactG], and a body's impact, not a phone's tick: at least
+ *     [minImpactSamples] samples above [impactBodyG] within [impactWindowSec].
+ *     A phone dropped or put down on a table rings for one sample (real phone:
+ *     put on a table, it said "Fall detected").
+ *     Never while the phone is held and looked at ([processSample] `held`) in the
+ *     [heldGraceSec] before the impact: that is the phone being put down.
  *  3. Settling: the first [settleSec] after impact contain bounces and are
  *     deliberately NOT used for the immobility test (including them made the
  *     original implementation reject genuine falls).
@@ -30,6 +37,12 @@ enum class FallState {
 class FallDetector(
     private val impactG: Float = 2.5f,
     private val freeFallG: Float = 0.6f,
+    private val lowG: Float = 0.75f,
+    private val minLowGSamples: Int = 5,
+    private val impactBodyG: Float = 1.5f,
+    private val minImpactSamples: Int = 3,
+    private val impactWindowSec: Float = 0.4f,
+    private val heldGraceSec: Float = 2.0f,
     private val freeFallLookbackSec: Float = 1.0f,
     private val settleSec: Float = 1.5f,
     private val observeSec: Float = 6.0f,
@@ -54,6 +67,8 @@ class FallDetector(
     private var hCount = 0
 
     private var impactT = 0L
+    private var impactSamples = 0
+    private var lastHeldT = Long.MIN_VALUE
     private var lastT = Long.MIN_VALUE
     private val preImpactDir = FloatArray(3)
     // Welford statistics over the observation phase.
@@ -62,18 +77,24 @@ class FallDetector(
     private var obsM2 = 0.0
     private val obsSum = DoubleArray(3)
 
-    /** Returns true exactly once, on the sample that confirms a fall. */
-    fun processSample(tNanos: Long, ax: Float, ay: Float, az: Float): Boolean {
+    /**
+     * Returns true exactly once, on the sample that confirms a fall. [held]: the phone is in
+     * the hand and looked at (screen on, uncovered): an impact then is the phone being put down.
+     */
+    fun processSample(tNanos: Long, ax: Float, ay: Float, az: Float, held: Boolean = false): Boolean {
         val gap = lastT != Long.MIN_VALUE && (tNanos - lastT) > (maxGapSec * 1e9f).toLong()
         lastT = tNanos
+        if (held) lastHeldT = tNanos
+        val heldRecently = lastHeldT != Long.MIN_VALUE && tNanos - lastHeldT <= (heldGraceSec * 1e9f).toLong()
         val magG = sqrt(ax * ax + ay * ay + az * az) / G
         var confirmed = false
 
         when (currentState) {
             FallState.MONITORING -> {
-                if (magG > impactG && hadPreImpactLowG(tNanos) && estimatePreImpactDirection(tNanos)) {
+                if (magG > impactG && !heldRecently && hadPreImpactLowG(tNanos) && estimatePreImpactDirection(tNanos)) {
                     currentState = FallState.IMPACT_SUSPECTED
                     impactT = tNanos
+                    impactSamples = 1
                     lastImpactPeakG = magG
                     obsN = 0; obsMean = 0.0; obsM2 = 0.0; obsSum.fill(0.0)
                 }
@@ -82,6 +103,11 @@ class FallDetector(
                 val sinceImpact = (tNanos - impactT) / 1e9f
                 if (gap) {
                     currentState = FallState.MONITORING // cannot judge across missing data
+                } else if (sinceImpact < impactWindowSec) {
+                    if (magG > impactBodyG) impactSamples++
+                    if (magG > lastImpactPeakG) lastImpactPeakG = magG
+                } else if (impactSamples < minImpactSamples) {
+                    currentState = FallState.MONITORING // a sharp tick: the phone hit something, the body did not
                 } else if (sinceImpact < settleSec) {
                     if (magG > lastImpactPeakG) lastImpactPeakG = magG
                 } else if (sinceImpact < settleSec + observeSec) {
@@ -133,14 +159,16 @@ class FallDetector(
 
     private fun hadPreImpactLowG(now: Long): Boolean {
         val from = now - (freeFallLookbackSec * 1e9f).toLong()
-        var found = false
+        var deep = false
+        var low = 0
         forHistory { t, i ->
             if (t >= from) {
                 val m = sqrt(hA[i * 3] * hA[i * 3] + hA[i * 3 + 1] * hA[i * 3 + 1] + hA[i * 3 + 2] * hA[i * 3 + 2]) / G
-                if (m < freeFallG) found = true
+                if (m < freeFallG) deep = true
+                if (m < lowG) low++
             }
         }
-        return found
+        return deep && low >= minLowGSamples
     }
 
     /** Mean acceleration (≈ gravity direction) over the second before the fall began. */

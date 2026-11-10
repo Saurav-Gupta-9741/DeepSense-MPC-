@@ -19,6 +19,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -62,6 +63,26 @@ class ContactAlert(
         private const val ANSWER_TIMEOUT_MS = 45_000L
         private const val CODE_TIMEOUT = -100
         private const val CODE_EXCEPTION = -101
+        private const val PREFS = "contact_alert"
+        private const val KEY_LAST_SUB = "last_working_sim"
+
+        /**
+         * WhatsApp chat with the contact, the alert written in (sent over the internet, so it works
+         * when the SIM cannot text). A 10-digit number gets the SIM's country code (India: 91).
+         */
+        fun whatsAppIntent(c: Context, phone: String, text: String): Intent {
+            val digits = phone.filter { it.isDigit() }
+            val iso = runCatching { c.getSystemService(TelephonyManager::class.java)?.simCountryIso }.getOrNull().orEmpty()
+            val intl = when {
+                phone.trim().startsWith("+") -> digits
+                digits.startsWith("00") -> digits.drop(2)
+                iso.equals("in", true) && digits.length == 11 && digits.startsWith("0") -> "91" + digits.drop(1)
+                iso.equals("in", true) && digits.length == 10 -> "91$digits"
+                else -> digits
+            }
+            return Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$intl?text=" + Uri.encode(text)))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         private const val LOCATION_MAX_AGE_MS = 15 * 60_000L
 
         fun hasSmsPermission(c: Context) =
@@ -169,7 +190,7 @@ class ContactAlert(
      * signal is tried again [RETRY_ROUNDS] times; on failure Messages is one tap away.
      */
     private fun deliver(k: AlertKind, phone: String, text: String, round: Int) {
-        sendSms(phone, text) { ok, code ->
+        sendSms(phone, text) { ok, code, tried ->
             val noSignal = code == SmsManager.RESULT_ERROR_NO_SERVICE || code == SmsManager.RESULT_ERROR_RADIO_OFF ||
                 code == SmsManager.RESULT_ERROR_GENERIC_FAILURE
             if (!ok && k != AlertKind.TEST && noSignal && round < RETRY_ROUNDS) {
@@ -180,7 +201,8 @@ class ContactAlert(
             if (ok) lastSent[k] = SystemClock.elapsedRealtime()
             val at = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
             val result = if (ok) context.getString(R.string.fit_alert_sent, contactName(), at)
-                else context.getString(R.string.fit_alert_failed, contactName(), at, describe(code))
+                else context.getString(R.string.fit_alert_failed, contactName(), at, describe(code)) + " " +
+                    context.resources.getQuantityString(R.plurals.fit_sims_tried, tried, tried)
             val n = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(result)
@@ -189,6 +211,8 @@ class ContactAlert(
                 .setAutoCancel(true)
             if (!ok) n.setContentText(context.getString(R.string.fit_alert_open_messages))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(result + "\n" + context.getString(R.string.fit_alert_open_messages)))
+                .addAction(0, context.getString(R.string.fit_alert_send_whatsapp), PendingIntent.getActivity(context, 34,
+                    whatsAppIntent(context, phone, text), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             notificationManager.notify(NOTIFICATION_ID, n.build())
             SensingRepository.setFailedSms(if (ok) null else phone to text)
             SensingRepository.setMessage(result)
@@ -211,14 +235,19 @@ class ContactAlert(
      * any other active SIM (needs READ_PHONE_STATE). A dual-SIM phone's default may have no signal
      * ("error 4" on a real phone while the other SIM worked), so each is tried in turn.
      */
+    private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     @SuppressLint("MissingPermission") // checked
     private fun smsSubscriptions(): List<Int> {
         val ids = LinkedHashSet<Int>()
+        ids += prefs.getInt(KEY_LAST_SUB, SubscriptionManager.INVALID_SUBSCRIPTION_ID) // the SIM that worked last time
         ids += SubscriptionManager.getDefaultSmsSubscriptionId()
         ids += SubscriptionManager.getDefaultVoiceSubscriptionId()
         ids += SubscriptionManager.getDefaultDataSubscriptionId()
         ids += SubscriptionManager.getDefaultSubscriptionId()
+        ids += slotSubscriptions() // every SIM slot: needs no permission (Android 10+)
         ids.remove(SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+        ids.removeAll { it < 0 }
         if (hasPhoneStatePermission(context)) {
             val active = runCatching {
                 context.getSystemService(SubscriptionManager::class.java)?.activeSubscriptionInfoList?.map { it.subscriptionId }
@@ -228,6 +257,24 @@ class ContactAlert(
         return ids.toList()
     }
 
+    /**
+     * The SIM in each slot. Without the phone-state permission Android hides the list of SIMs, so on
+     * a real dual-SIM phone only the default one was tried (one failed text in the thread, not two).
+     */
+    private fun slotSubscriptions(): List<Int> = runCatching {
+        val tm = context.getSystemService(TelephonyManager::class.java) ?: return@runCatching emptyList<Int>()
+        @Suppress("DEPRECATION")
+        val slots = if (Build.VERSION.SDK_INT >= 30) tm.activeModemCount else tm.phoneCount
+        val sm = context.getSystemService(SubscriptionManager::class.java)
+        (0 until slots).mapNotNull { slot ->
+            if (Build.VERSION.SDK_INT >= 34) SubscriptionManager.getSubscriptionId(slot)
+            else if (Build.VERSION.SDK_INT >= 29) {
+                @Suppress("DEPRECATION")
+                sm?.getSubscriptionIds(slot)?.firstOrNull()
+            } else null
+        }
+    }.getOrDefault(emptyList())
+
     private fun smsManager(id: Int?): SmsManager = if (Build.VERSION.SDK_INT >= 31) {
         val base = context.getSystemService(SmsManager::class.java)
         if (id != null) base.createForSubscriptionId(id) else base
@@ -236,17 +283,21 @@ class ContactAlert(
         if (id != null) SmsManager.getSmsManagerForSubscriptionId(id) else SmsManager.getDefault()
     }
 
-    /** Tries each SIM until one sends; [done] gets the last error code (null: could not even try). */
-    private fun sendSms(phone: String, text: String, done: (Boolean, Int?) -> Unit) {
+    /** Tries each SIM until one sends; [done] gets the last error code (null: could not even try) and the SIMs tried. */
+    private fun sendSms(phone: String, text: String, done: (Boolean, Int?, Int) -> Unit) {
         val subs: List<Int?> = smsSubscriptions().ifEmpty { listOf(null) } // null: Android's default
+        Log.i(TAG, "SMS: trying SIM subscriptions $subs")
         var lastCode: Int? = null
         fun attempt(i: Int) {
-            if (i >= subs.size) { done(false, lastCode); return }
+            if (i >= subs.size) { done(false, lastCode, subs.size); return }
             sendOnce(subs[i], phone, text) { code ->
                 when (code) {
-                    Activity.RESULT_OK -> done(true, null)
+                    Activity.RESULT_OK -> {
+                        subs[i]?.let { prefs.edit().putInt(KEY_LAST_SUB, it).apply() }
+                        done(true, null, i + 1)
+                    }
                     // No answer: it may still go out; trying another SIM could send it twice.
-                    CODE_TIMEOUT -> done(false, code)
+                    CODE_TIMEOUT -> done(false, code, i + 1)
                     else -> { Log.w(TAG, "SMS on subscription ${subs[i]} failed: $code"); lastCode = code; attempt(i + 1) }
                 }
             }

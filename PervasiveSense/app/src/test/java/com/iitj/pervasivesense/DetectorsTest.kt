@@ -150,11 +150,13 @@ class FallDetectorTest {
             repeat((sec * 50).toInt()) { i -> rows += floatArrayOf(1.2f * G * sin(i * 0.9f), 0.3f * G, G + 1.0f * G * cos(i * 1.3f)) }
         }
         fun append(rec: Recording) = apply { rec.data.forEach { rows += floatArrayOf(it[0], it[1], it[2]) } }
-        fun run(d: FallDetector): Pair<Boolean, Long> {
+        fun run(d: FallDetector, held: (Int) -> Boolean = { false }): Pair<Boolean, Long> {
             var at = -1L
-            rows.forEachIndexed { i, r -> if (d.processSample(i * NS, r[0], r[1], r[2])) at = i * NS }
+            rows.forEachIndexed { i, r -> if (d.processSample(i * NS, r[0], r[1], r[2], held(i))) at = i * NS }
             return (at >= 0) to at
         }
+        /** Phone in the hand, screen towards the face (tilted 45°), with hand tremor. */
+        fun inHand(sec: Double) = hold(sec, 0f, 0.71f * G, 0.71f * G, 0.03f)
     }
 
     private fun standing() = Recording.fixture("standing_pocket")
@@ -201,6 +203,51 @@ class FallDetectorTest {
         val b = Builder().append(standing()).impact(3.5f).hold(10.0, 0f, 0f, G)
         val d = FallDetector()
         assertFalse(b.run(d).first)
+    }
+
+    // ---- Real phone: put on a table, it said "Fall detected". None of these may ever be a fall.
+
+    /** Let go 10 cm above the table: a real free fall (0.14 s), one sharp 4 g tick, a small rebound, then flat and still. */
+    private fun droppedOnTable() = Builder().inHand(3.0).freeFall(0.14).hold(0.02, 0f, 0f, 4f * G, 0f)
+        .hold(0.02, 0f, 0f, 1.7f * G, 0f).hold(12.0, 0f, 0f, G, 0.005f)
+
+    /** Brought down quickly by hand (a 60 ms dip, not a fall) and set down hard (3 g, 3 samples). */
+    private fun putDownHardOnTable() = Builder().inHand(3.0).hold(0.06, 0f, 0.35f * G, 0.35f * G, 0.01f)
+        .hold(0.06, 0f, 0f, 3f * G, 0f).hold(12.0, 0f, 0f, G, 0.005f)
+
+    @Test
+    fun withTheOldRulesTheTableWasAFall() {
+        // The bug, reproduced: one low-g sample + any 2.5 g spike + tilt change + stillness was enough.
+        val old = { FallDetector(lowG = 0.6f, minLowGSamples = 1, minImpactSamples = 1) }
+        assertTrue(droppedOnTable().run(old()).first)
+        assertTrue(putDownHardOnTable().run(old()).first)
+    }
+
+    @Test
+    fun phoneDroppedOntoATableIsNotAFall() {
+        assertFalse(droppedOnTable().run(FallDetector()).first)
+    }
+
+    @Test
+    fun phonePutDownHardOnATableIsNotAFall() {
+        assertFalse(putDownHardOnTable().run(FallDetector()).first)
+    }
+
+    @Test
+    fun phonePutDownWhileLookingAtItIsNotAFall() {
+        // Even a fall-like put-down (long dip, heavy contact) while the phone was held and looked at.
+        val b = Builder().inHand(3.0).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
+        val heldUntil = 3 * 50 + 10
+        assertFalse(b.run(FallDetector()) { it < heldUntil }.first)
+        // The same motion with the phone on the body (not held) is a fall: the gate is only the hand.
+        assertTrue(b.run(FallDetector()).first)
+    }
+
+    @Test
+    fun phoneTossedRepeatedlyOnATableNeverAlarms() {
+        val b = Builder()
+        repeat(10) { b.inHand(2.0).freeFall(0.1 + 0.02 * it).hold(0.02, 0f, 0f, (3f + 0.3f * it) * G, 0f).hold(8.0, 0f, 0f, G, 0.005f) }
+        assertFalse(b.run(FallDetector()).first)
     }
 
     @Test

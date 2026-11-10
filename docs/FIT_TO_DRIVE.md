@@ -342,3 +342,21 @@ Many phones' proximity sensor gives no reading until it is first covered, so "he
 be missed. Check my walk with only one way of carrying recorded now treats that way as known: the
 screen and voice tell the user to walk that way. A wobbly walk then gets its full result, never the
 "a way you haven't recorded" downgrade. The test for this fails without the fix and passes with it.
+
+## v3.4: no "fall" when the phone is put on a table; SMS on every SIM slot
+
+- **Fall detector.** On the phone, putting it on a table said "Fall detected": one low-g sample, one
+  table tick above 2.5 g, a tilt change (hand to flat) and stillness passed every check. Now a fall
+  needs three more things:
+  - a falling phase of at least 0.1 s (5 samples below 0.75 g);
+  - a body's impact: 3 samples above 1.5 g within 0.4 s, where a phone hitting a table rings for one;
+  - the phone not held and looked at in the 2 s before.
+
+  Tests: the old rules still alarm on the table scenarios (the bug reproduced), the new rules never do.
+  Genuine falls and the real daily-activity recordings give the same results as before.
+- **SMS.** Without the phone-state permission Android hides the second SIM, so only the default one
+  was tried: one failed text in the thread, not two, and the "every SIM" message was wrong. Now
+  every SIM slot is tried without any permission (Android 10+), the SIM that worked last time goes
+  first, and the message says how many SIMs were tried. If no SIM can text (on the test phone Messages
+  could not send either), **Send on WhatsApp** sends the alert over the internet in one tap. It is on
+  the screen and in the notification.

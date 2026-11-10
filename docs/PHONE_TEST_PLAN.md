@@ -140,5 +140,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 125 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 130 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)
