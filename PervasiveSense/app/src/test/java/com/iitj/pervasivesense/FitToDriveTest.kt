@@ -145,6 +145,12 @@ class GaitBaselineTest {
 
 class FitToDriveMonitorTest {
 
+    @Test
+    fun aFallAlertTextsButNeverCalls() {
+        assertFalse(ContactAlert.callsFor(AlertKind.FALL))
+        for (k in AlertKind.values().filter { it != AlertKind.FALL }) assertTrue(k.name, ContactAlert.callsFor(k))
+    }
+
     private val start = 1_000_000_000L
     private val events = ArrayList<FitToDriveEvent>()
     private val config = FitToDriveMonitor.Config(segmentsForProvisional = 15, maxPerDay = 10_000)

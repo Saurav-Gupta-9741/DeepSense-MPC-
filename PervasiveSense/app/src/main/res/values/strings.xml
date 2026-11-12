@@ -66,8 +66,8 @@
     <string name="fall_help_now">Get help now</string>
     <string name="fall_alert_title">Did you fall? Are you OK?</string>
     <string name="fall_alert_notify_title">Fall detected: texting %1$s soon</string>
-    <string name="fall_alert_detail">It looks like you fell. Tap I’m OK if you are fine, or Get help now. If nobody answers, %1$s gets a text with your location and a call.</string>
-    <string name="fall_say_alert">It looks like you fell. Are you OK? Tap I am OK. If you need help, tap Get help now. If nobody answers in one minute, your contact will get a message and a call.</string>
+    <string name="fall_alert_detail">It looks like you fell. Tap I’m OK if you are fine, or Get help now. If nobody answers, %1$s gets a text with your location (no call).</string>
+    <string name="fall_say_alert">It looks like you fell. Are you OK? Tap I am OK. If you need help, tap Get help now. If nobody answers in one minute, your contact will get a message with your location.</string>
     <string name="fall_say_ok">OK. Glad you are fine.</string>
     <string name="fall_say_no_contact">It looks like you fell. Are you OK? To have someone alerted next time, save a trusted contact in Fit to drive settings.</string>
     <string name="fall_notify_no_contact">It looks like you fell. Tap I’m OK if you are fine. Save a trusted contact (Fit to drive › Settings) to have someone alerted when you don’t answer.</string>
@@ -311,7 +311,7 @@
     <string name="fit_say_erratic">Your driving looks unsteady. Please stop somewhere safe.</string>
     <string name="fit_watching_driving">Your walk was not normal less than an hour ago: trips and driving are being watched.</string>
     <string name="fit_alert_switch">Alert my contact if I drive after a warning</string>
-    <string name="fit_alert_switch_hint">Within an hour of a warning, if your car’s Bluetooth connects or the driving looks unsteady (also after a slightly unusual walk), your contact gets a text message (with your location, if allowed) and, if you allow it, a call. You always get 30 seconds to cancel, for example as a passenger.\nEvery other drive is watched too, even if you never checked your walk: if the driving looks clearly unsteady, the phone asks “Are you OK?”. No answer within 60 seconds alerts your contact.\nA fall (fall detection) asks “Are you OK?” the same way.</string>
+    <string name="fit_alert_switch_hint">Within an hour of a warning, if your car’s Bluetooth connects or the driving looks unsteady (also after a slightly unusual walk), your contact gets a text message (with your location, if allowed) and, if you allow it, a call. You always get 30 seconds to cancel, for example as a passenger.\nEvery other drive is watched too, even if you never checked your walk: if the driving looks clearly unsteady, the phone asks “Are you OK?”. No answer within 60 seconds alerts your contact.\nA fall (fall detection) asks “Are you OK?” the same way; a fall sends only the text, never a call.</string>
     <string name="fit_alert_test">Send a test alert</string>
     <string name="fit_alert_ok">I’m OK</string>
     <string name="fit_alert_ask_title">Are you OK?</string>
@@ -349,7 +349,7 @@
     <string name="watchdog_stopped_title">PervasiveSense stopped</string>
     <string name="watchdog_stopped_text">The phone closed the app, so drives and falls are not being watched. Tap to turn it back on.</string>
     <string name="fit_alert_call_switch">Also phone them</string>
-    <string name="fit_alert_call_hint">After the text, your phone calls them on speaker, so they can talk to you. A call can get through even when a text cannot. The test alert calls too.</string>
+    <string name="fit_alert_call_hint">After the text, your phone calls them on speaker, so they can talk to you. A call can get through even when a text cannot. The test alert calls too. A fall never calls: it sends only the text.</string>
     <string name="fit_alert_need_call">Allow phone calls so the alert can call your contact.</string>
     <string name="fit_say_calling">Calling %1$s now.</string>
     <string name="fit_calling">Calling %1$s…</string>

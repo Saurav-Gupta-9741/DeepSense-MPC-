@@ -522,3 +522,12 @@ Tests (2 new, 158 JVM tests): every kind of drop gets its reason; everyday movem
 - Tests (4 new, 162 JVM tests): a drop from the hand is ignored normally and counts in a fall test
   (end to end from raw sensor events), a hard landing in a test is explained, a fall clears itself
   when the person walks, a deep-pillow drop is "too soft".
+
+## v3.12: a fall never calls
+
+- **A fall alert is the text only.** No answer in 60 s (or **Get help now**) sends the text with the
+  location ("I may have fallen... Please call me now."); the phone no longer calls the contact
+  afterwards, even with **Also phone them** on. The phone may be lying away from the person, and a
+  call on speaker from the floor helps nobody; the contact calls back instead. Driving alerts still
+  text and then call. The status line reads "Alert sent to ... at HH:MM".
+- Tests (1 new, 163 JVM tests): a fall alert never calls; every driving alert and the test alert may.

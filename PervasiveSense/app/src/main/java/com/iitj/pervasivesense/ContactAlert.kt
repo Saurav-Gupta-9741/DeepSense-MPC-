@@ -53,7 +53,8 @@ data class AlertCountdown(val kind: AlertKind, val secondsLeft: Int, val contact
  * button in the notification and on the screen), so a passenger or a false
  * alarm never reaches the contact. Then a text message from the user's own
  * phone, with the location if the user allowed it, then (if allowed) a phone
- * call to the contact on speaker. At most one alert of each kind per hour.
+ * call to the contact on speaker; a fall is never followed by a call ([callsFor]).
+ * At most one alert of each kind per hour.
  * Unsteady driving with no warning ([AlertKind.UNSTEADY_DRIVING]) asks the driver
  * first, for [ASK_SEC], spoken again near the end: "I'm OK" or "I'm a passenger"
  * stops it, no answer sends it. The countdown also opens [AlertActivity] over the
@@ -81,10 +82,17 @@ class ContactAlert(
         const val NOTIFICATION_ID = 1005
         const val ACTION_CANCEL = "com.iitj.pervasivesense.action.CANCEL_ALERT"
         const val ACTION_OK = "com.iitj.pervasivesense.action.DRIVER_OK"
-        /** "Get help now" (a fall): the text and the call go out at once. */
+        /** "Get help now" (a fall): the text goes out at once (a fall never calls, see [callsFor]). */
         const val ACTION_HELP_NOW = "com.iitj.pervasivesense.action.HELP_NOW"
         /** The status line ("Alert sent to ...", "Calling ...") clears itself after this long. */
         private const val STATUS_MS = 10 * 60_000L
+
+        /**
+         * Whether this kind of alert may phone the contact after the text. A fall only texts: the
+         * phone may be lying on the floor away from the person, and an automatic call on speaker
+         * from there helps nobody; the text carries the location and asks the contact to call.
+         */
+        fun callsFor(k: AlertKind) = k != AlertKind.FALL
 
         /** The question kinds: the person answers "I'm OK" (or nobody answers). */
         fun asks(k: AlertKind) = k == AlertKind.UNSTEADY_DRIVING || k == AlertKind.FALL
@@ -358,7 +366,8 @@ class ContactAlert(
         val phone = FitToDriveStore.contactPhone(context)
         deliver(k, phone, text, 0, test)
         // Then a call (a call can get through when a text cannot, and the contact hears the driver).
-        if (callsContact(context)) {
+        // Never after a fall: that alert is the text only.
+        if (callsFor(k) && callsContact(context)) {
             callPhone = phone
             handler.removeCallbacks(sayCalling); handler.removeCallbacks(call)
             handler.postDelayed(sayCalling, CALL_DELAY_MS - 4_000L)
