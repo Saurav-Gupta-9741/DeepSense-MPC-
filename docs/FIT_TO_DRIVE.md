@@ -433,3 +433,30 @@ the time and trigger of the last check), whether every drive is watched and who 
 and one large button for the next step: Turn on, Continue set-up, Check my walk (starts the check
 on the Fit to drive screen), Balance check, Find a cab or Start sensing. The border takes the
 state's colour. No button is offered while in a vehicle.
+
+## v3.8: the phone anywhere in the car or on the body; "Test drive (no car)"
+
+- **Anywhere.** The driving watch is now tested with the phone in a trouser pocket, a shirt or
+  jacket pocket, on the belt, in a bag on the seat or floor, rattling in a cup holder or door
+  pocket, in a dashboard holder, and lying on the seat. In every place, 5 minutes of city driving
+  is never erratic, a minute of weaving is caught, and a real swerve is jerky steering.
+- **The driver's body is not the car.** With the phone in a shirt pocket, a look over the shoulder
+  turns the phone as fast as a swerve. In the tests, a shoulder check every 20 s made a calm drive
+  erratic (the control, kept as a test). Now:
+  - the car's forward axis in the phone is learned from braking and pulling away on a straight
+    road, so sideways acceleration is measured apart from braking;
+  - a jerk of the wheel needs the car to be thrown sideways (the sideways acceleration changes by
+    1 m/s² within 1 s); the body turning does not do that, even in a bend or while braking;
+  - a fast swing (over 0.3 rad/s) with no sideways push is the body, not a weaving swing.
+  The sideways push is measured as a change of the horizontal acceleration vector: the old
+  difference of two lengths of about 1 g was too noisy (up to 1.4 m/s²).
+- **Test drive (no car).** Fit to drive settings, under *Send a test alert*: for 5 minutes the
+  driving watch runs on the phone's real sensors as if in a vehicle. Turning left and right on a
+  swivel chair (phone in a pocket, screen locked) looks like weaving to the gyroscope: the phone
+  asks "Are you OK?" over the lock screen exactly as on a real trip; no answer sends the text
+  (marked TEST) and the call. Sitting still asks nothing. When the 5 minutes end the phone says
+  whether unsteady driving was noticed. A test never blocks a real alert. Only the vehicle
+  detection is skipped, and the check that ignores body turns is off (a chair turn is a body turn).
+- **Limit:** the phone **held in the hand** while driving cannot be judged (the hand moves it more
+  than the car); it is judged again as soon as it is put down or away.
+- **Tests (7 new, 150 JVM tests).**

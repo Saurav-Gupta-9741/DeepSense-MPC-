@@ -301,6 +301,16 @@
     <string name="fit_keep_samsung">Samsung: also Settings › Battery › Background usage limits › Never sleeping apps › add PervasiveSense.</string>
     <string name="fit_keep_fix">Fix</string>
     <string name="fit_keep_settings">App settings</string>
+    <string name="fit_test_drive">Test drive (no car)</string>
+    <string name="fit_test_drive_stop">Stop test drive (%1$s left)</string>
+    <string name="fit_test_drive_banner">Test drive, %1$s left: phone in your pocket, screen locked. On a swivel chair, turn left and right every 2 s for about a minute.</string>
+    <string name="fit_test_drive_tag">"TEST · "</string>
+    <string name="fit_card_test_drive">🧪 Test drive: %1$s left</string>
+    <string name="fit_say_test_drive_start">Test drive for five minutes. Lock the screen and put the phone in your pocket. Sit on a swivel chair and turn left and right every two seconds, for about a minute. Sitting still should not set it off.</string>
+    <string name="fit_say_test_drive_stopped">Test drive stopped.</string>
+    <string name="fit_say_test_drive_done_asked">Test drive finished. Unsteady driving was noticed.</string>
+    <string name="fit_say_test_drive_done_quiet">Test drive finished. No unsteady driving was noticed.</string>
+    <string name="fit_sms_test_drive_prefix">"TEST (practice, no car): "</string>
     <string name="watchdog_stopped_title">PervasiveSense stopped</string>
     <string name="watchdog_stopped_text">The phone closed the app, so drives and falls are not being watched. Tap to turn it back on.</string>
     <string name="fit_alert_call_switch">Also phone them</string>

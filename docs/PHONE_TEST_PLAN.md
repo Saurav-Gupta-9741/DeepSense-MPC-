@@ -122,6 +122,7 @@ Extra checks (optional):
 | I15 | With the alert on, open *Settings ▸* and look under *Send a test alert* | *Keeps running when the app is closed* and *Alert opens over the lock screen* both say ✓ (otherwise tap **Fix**) |
 | I16 | **Passenger only**, no walk check: in a car holder, screen locked, the driver makes slow S-curves in an empty lot for about 1 min | The screen turns on with **Are you OK?**, a 60 s countdown and **I'm OK** / **I'm a passenger**; the question is spoken again at 30 s and 10 s. **I'm OK** stops it. Unanswered: text, then call |
 | I17 | Swipe PervasiveSense away from the recent apps, wait 1 min | The PervasiveSense notification is still there (or comes back within seconds) |
+| I18 | No car: *Settings ▸* **Test drive (no car)**, lock the screen, phone in a trouser pocket, turn left and right on a swivel chair every 2 s for about a minute | **Are you OK?** over the lock screen, spoken; **I'm OK** stops it; unanswered, a text starting *TEST (practice, no car)*, then a call. Sitting still for the 5 minutes: nothing, and the phone says *No unsteady driving was noticed* |
 
 ---|---|---|
 | I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the *Set up (0 of 3 done)* card appears |
@@ -143,5 +144,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 143 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 150 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

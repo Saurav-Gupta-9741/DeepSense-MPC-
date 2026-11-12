@@ -41,7 +41,9 @@ enum class AlertKind {
 }
 
 /** A contact alert counting down (shown on the fit-to-drive screen). */
-data class AlertCountdown(val kind: AlertKind, val secondsLeft: Int, val contactName: String)
+data class AlertCountdown(val kind: AlertKind, val secondsLeft: Int, val contactName: String,
+                          /** From a "Test drive (no car)": the text says TEST. */
+                          val test: Boolean = false)
 
 /**
  * Opt-in alert to the trusted contact: "I may be driving after a fit-to-drive
@@ -153,6 +155,8 @@ class ContactAlert(
     }
 
     private var kind: AlertKind? = null
+    /** A "Test drive (no car)" alert: the text says TEST, and it never blocks a real alert. */
+    private var testRun = false
     private var deadline = 0L
     private var location: Location? = null
     private var locationListeners: List<LocationListener> = emptyList()
@@ -166,8 +170,11 @@ class ContactAlert(
 
     val running get() = kind != null
 
-    /** Starts a countdown; false if not set up, one is running or this kind was sent within the hour. */
-    fun start(k: AlertKind): Boolean {
+    /**
+     * Starts a countdown; false if not set up, one is running or this kind was sent within the hour.
+     * [test]: from a "Test drive (no car)".
+     */
+    fun start(k: AlertKind, test: Boolean = false): Boolean {
         val now = SystemClock.elapsedRealtime()
         val current = kind
         if (current != null) {
@@ -176,10 +183,11 @@ class ContactAlert(
             return false
         }
         val last = lastSent[k]
-        if (k != AlertKind.TEST && last != null && now - last < REPEAT_MS) return false
+        if (k != AlertKind.TEST && !test && last != null && now - last < REPEAT_MS) return false
         if (!ready(context)) return false
         SensingRepository.setFailedSms(null)
         kind = k
+        testRun = test
         deadline = now + 1000L * countdownSec(k)
         askedAgain.clear()
         location = null
@@ -238,7 +246,7 @@ class ContactAlert(
         if (k == AlertKind.UNSTEADY_DRIVING && left in ASK_AGAIN_AT && askedAgain.add(left)) {
             say(context.getString(R.string.fit_say_alert_unsteady_again, left))
         }
-        SensingRepository.setAlert(AlertCountdown(k, left, contactName()))
+        SensingRepository.setAlert(AlertCountdown(k, left, contactName(), testRun))
         handler.postDelayed(tick, 1000L)
     }
 
@@ -246,8 +254,9 @@ class ContactAlert(
 
     private fun send(k: AlertKind) {
         val loc = location ?: lastKnownLocation()
+        val test = testRun
         stop()
-        var text = context.getString(when (k) {
+        var text = (if (test) context.getString(R.string.fit_sms_test_drive_prefix) else "") + context.getString(when (k) {
             AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_sms_driving
             AlertKind.ERRATIC_DRIVING -> R.string.fit_sms_erratic
             AlertKind.UNSTEADY_DRIVING -> R.string.fit_sms_unsteady
@@ -260,7 +269,7 @@ class ContactAlert(
             if (ageMin >= 2) text += context.getString(R.string.fit_sms_location_age, ageMin)
         }
         val phone = FitToDriveStore.contactPhone(context)
-        deliver(k, phone, text, 0)
+        deliver(k, phone, text, 0, test)
         // Then a call (a call can get through when a text cannot, and the contact hears the driver).
         if (callsContact(context)) {
             callPhone = phone
@@ -324,16 +333,16 @@ class ContactAlert(
      * "Sent" only once the network confirms. Every SIM is tried; a real alert that finds no
      * signal is tried again [RETRY_ROUNDS] times; on failure Messages is one tap away.
      */
-    private fun deliver(k: AlertKind, phone: String, text: String, round: Int) {
+    private fun deliver(k: AlertKind, phone: String, text: String, round: Int, test: Boolean = false) {
         sendSms(phone, text) { ok, code, tried ->
             val noSignal = code == SmsManager.RESULT_ERROR_NO_SERVICE || code == SmsManager.RESULT_ERROR_RADIO_OFF ||
                 code == SmsManager.RESULT_ERROR_GENERIC_FAILURE
-            if (!ok && k != AlertKind.TEST && noSignal && round < RETRY_ROUNDS) {
+            if (!ok && k != AlertKind.TEST && !test && noSignal && round < RETRY_ROUNDS) {
                 Log.w(TAG, "SMS failed ($code), trying again in ${RETRY_MS / 1000} s")
                 handler.postDelayed({ deliver(k, phone, text, round + 1) }, RETRY_MS)
                 return@sendSms
             }
-            if (ok) lastSent[k] = SystemClock.elapsedRealtime()
+            if (ok && !test) lastSent[k] = SystemClock.elapsedRealtime() // a test never blocks a real alert
             val at = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
             val result = if (ok) context.getString(R.string.fit_alert_sent, contactName(), at)
                 else context.getString(R.string.fit_alert_failed, contactName(), at, describe(code)) + " " +
@@ -497,8 +506,9 @@ class ContactAlert(
             Intent(context, SensingForegroundService::class.java).setAction(ACTION_CANCEL),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val secs = ((deadline - SystemClock.elapsedRealtime()) / 1000).toInt()
-        val title = context.getString(if (k == AlertKind.UNSTEADY_DRIVING) R.string.fit_alert_ask_notify_title
-            else R.string.fit_alert_notify_title, contactName())
+        val title = (if (testRun) context.getString(R.string.fit_test_drive_tag) else "") +
+            context.getString(if (k == AlertKind.UNSTEADY_DRIVING) R.string.fit_alert_ask_notify_title
+                else R.string.fit_alert_notify_title, contactName())
         val text = detailText(context, k, contactName())
         val b = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)

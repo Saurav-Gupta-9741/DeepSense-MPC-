@@ -43,8 +43,8 @@ class AlertActivity : AppCompatActivity() {
     private fun render(a: AlertCountdown?) = with(binding) {
         if (a == null) { finish(); return@with }
         val asking = a.kind == AlertKind.UNSTEADY_DRIVING
-        tvAlertScreenTitle.text = if (asking) getString(R.string.fit_alert_ask_title)
-            else getString(R.string.fit_alert_notify_title, a.contactName)
+        tvAlertScreenTitle.text = (if (a.test) getString(R.string.fit_test_drive_tag) else "") +
+            if (asking) getString(R.string.fit_alert_ask_title) else getString(R.string.fit_alert_notify_title, a.contactName)
         tvAlertScreenSeconds.text = getString(R.string.fit_balance_seconds, a.secondsLeft)
         tvAlertScreenDetail.text = ContactAlert.detailText(this@AlertActivity, a.kind, a.contactName)
         btnAlertScreenOk.visibility = if (asking) View.VISIBLE else View.GONE

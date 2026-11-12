@@ -205,6 +205,10 @@ class SensingEngine(
     /** "I'm OK" when asked about unsteady driving (no warning). */
     fun driverOk() = fitCommand { fitToDrive.driverOk(lastSampleT) }
 
+    /** "Test drive (no car)": the driving watch runs as if in a vehicle for 5 minutes. */
+    fun startTestDrive() = fitCommand { fitToDrive.startTestDrive(lastSampleT) }
+    fun stopTestDrive() = fitCommand { fitToDrive.stopTestDrive() }
+
     /** Every trip watched (the contact alert is on), not only after a warning. */
     fun setFitWatchEveryTrip(on: Boolean) { fitToDrive.watchEveryTrip = on }
     fun stopWalkRecording() = fitCommand { fitToDrive.stopWalkRecording() }

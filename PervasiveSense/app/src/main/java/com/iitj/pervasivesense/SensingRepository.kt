@@ -40,6 +40,8 @@ object SensingRepository {
         fun startBalanceTest(purpose: BalancePurpose, practice: Boolean)
         fun cancelContactAlert()
         fun driverOk()
+        fun startTestDrive()
+        fun stopTestDrive()
         fun startWalkRecording(position: CarryPosition)
         fun stopWalkRecording()
         fun sendTestAlert()
@@ -103,6 +105,9 @@ object SensingRepository {
     fun cancelContactAlert() { controller?.cancelContactAlert() }
     /** "I'm OK" when asked about unsteady driving. */
     fun driverOk() { controller?.driverOk() }
+    /** "Test drive (no car)": the driving watch runs on the real sensors as if in a vehicle, for 5 minutes. */
+    fun startTestDrive() { controller?.startTestDrive() }
+    fun stopTestDrive() { controller?.stopTestDrive() }
     fun sendTestAlert() { controller?.sendTestAlert() }
     fun startWalkRecording(position: CarryPosition) { controller?.startWalkRecording(position) }
     fun stopWalkRecording() { controller?.stopWalkRecording() }

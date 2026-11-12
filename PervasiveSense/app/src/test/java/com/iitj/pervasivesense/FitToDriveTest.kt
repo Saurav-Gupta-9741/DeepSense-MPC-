@@ -703,6 +703,46 @@ class FitToDriveMonitorTest {
         assertEquals(2, erratic().size)
     }
 
+    // ---------------------------------------------------------------- "Test drive (no car)"
+
+    private val sitting = Recording.constant(20.0, 0f, 0f, 9.81f, noise = 0.05f)
+    /** On a swivel chair: turning left and right every second, about ±30°, no sideways acceleration. */
+    private fun swivel(seconds: Double, seed: Int = 161) = drive(seconds, seed, speed = 0.0) { ts -> sin(2 * PI * ts / 2.0) }
+    private fun testDriveEnds() = events.filterIsInstance<FitToDriveEvent.TestDriveEnded>()
+
+    @Test
+    fun aTestDriveWatchesTheRealSensorsWithoutACarAndSaysWhenItEnds() {
+        val m = monitor() // the contact alert is off: a test drive is still watched
+        var t = start
+        assertTrue(m.startTestDrive(t))
+        assertEquals(300, m.report(t).testDriveSecondsLeft)
+        t = feed(m, sitting, t, walking = false)               // no vehicle detected at all
+        t = feed(m, swivel(60.0), t, walking = false)
+        val e = erratic().single()
+        assertTrue(e.test)
+        assertFalse(e.warned) // the "Are you OK?" question, as on a real trip without a warning
+        feed(m, Recording.constant(230.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        assertTrue(testDriveEnds().single().asked)
+        assertEquals(0, m.report().testDriveSecondsLeft)
+    }
+
+    @Test
+    fun sittingStillInATestDriveIsNotAskedAboutAndNothingIsWatchedAfterIt() {
+        val m = monitor()
+        var t = start
+        m.startTestDrive(t)
+        t = feed(m, Recording.constant(310.0, 0f, 0f, 9.81f, noise = 0.05f), t, walking = false)
+        assertFalse(testDriveEnds().single().asked)
+        // The test is over and no vehicle: turning the chair now is not a drive.
+        feed(m, swivel(60.0, seed = 162), t, walking = false)
+        assertTrue(erratic().isEmpty())
+        // Stopped early: nothing either.
+        m.startTestDrive(t + 70_000_000_000L)
+        m.stopTestDrive()
+        feed(m, swivel(60.0, seed = 163), t + 71_000_000_000L, walking = false)
+        assertTrue(erratic().isEmpty())
+    }
+
     @Test
     fun withoutAWarningDrivingIsNeverReported() {
         // The contact alert is off (watchEveryTrip false): only a warning makes the driving watched.

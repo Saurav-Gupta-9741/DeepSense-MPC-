@@ -384,6 +384,8 @@ class MainActivity : AppCompatActivity() {
         // Is every drive watched? (the contact alert is the safety net)
         val watch = when {
             !enabled || status == ServiceStatus.STOPPED || f == null -> null
+            f.testDriveSecondsLeft > 0 -> getString(R.string.fit_card_test_drive,
+                String.format(Locale.US, "%d:%02d", f.testDriveSecondsLeft / 60, f.testDriveSecondsLeft % 60)) to R.color.primary_glow
             f.watchingDriving -> getString(R.string.fit_watching_driving) to R.color.accent_amber
             ContactAlert.ready(this@MainActivity) -> getString(R.string.fit_card_watch_all,
                 FitToDriveStore.contactName(this@MainActivity).ifBlank { FitToDriveStore.contactPhone(this@MainActivity) }) to R.color.accent_emerald

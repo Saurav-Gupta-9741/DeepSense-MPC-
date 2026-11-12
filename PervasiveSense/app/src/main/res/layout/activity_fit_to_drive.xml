@@ -978,6 +978,18 @@
                         android:visibility="gone"
                         app:cornerRadius="12dp" />
 
+                    <!-- The driving watch on the real sensors, without a car (swivel chair = weaving). -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnTestDrive"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/fit_test_drive"
+                        android:textColor="@color/text_main"
+                        android:visibility="gone"
+                        app:cornerRadius="12dp" />
+
                     <!-- Can the watch keep running (battery) and the alert open over the lock screen? -->
                     <LinearLayout
                         android:id="@+id/rowKeepRunning"

@@ -445,14 +445,16 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             }), interrupt = false)
             is FitToDriveEvent.ErraticDriving -> if (event.warned) {
                 notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_erratic_text), balanceAction = false)
-                if (!alert().start(AlertKind.ERRATIC_DRIVING)) speak(getString(R.string.fit_say_erratic))
+                if (!alert().start(AlertKind.ERRATIC_DRIVING, test = event.test)) speak(getString(R.string.fit_say_erratic))
             } else {
                 // No warning: ask the driver first ("Are you OK?"); only no answer reaches the contact.
-                if (!alert().start(AlertKind.UNSTEADY_DRIVING)) {
+                if (!alert().start(AlertKind.UNSTEADY_DRIVING, test = event.test)) {
                     notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_unsteady_text), balanceAction = false)
                     speak(getString(R.string.fit_say_erratic))
                 }
             }
+            is FitToDriveEvent.TestDriveEnded -> speak(getString(
+                if (event.asked) R.string.fit_say_test_drive_done_asked else R.string.fit_say_test_drive_done_quiet), interrupt = false)
             is FitToDriveEvent.BalanceDone -> {
                 studyLogBalance(event.result)
             }
@@ -631,6 +633,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
     override fun cancelContactAlert() { handler.post { contactAlert?.cancel(asPassenger = true) } }
     override fun driverOk() { handler.post { contactAlert?.ok() } }
+    override fun startTestDrive() { handler.post { engine?.startTestDrive() } }
+    override fun stopTestDrive() { handler.post { engine?.stopTestDrive() } }
     override fun startWalkRecording(position: CarryPosition) { handler.post { engine?.startWalkRecording(position) } }
     override fun stopWalkRecording() { handler.post { engine?.stopWalkRecording() } }
 

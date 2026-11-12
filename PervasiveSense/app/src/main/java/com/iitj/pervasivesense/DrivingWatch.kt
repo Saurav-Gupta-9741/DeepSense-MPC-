@@ -23,7 +23,8 @@ class DrivingEvent(val tNanos: Long, val type: DrivingEventType, val magnitude: 
  *    least [Config.swingRadS] within [Config.weavingWindowSec]. A turn is one
  *    swing, a lane change two, a roundabout about three.
  *  - JERKY_STEERING: the turn rate changes by [Config.jerkRadS] within 0.5 s
- *    (a sudden jerk of the wheel or a swerve).
+ *    (a sudden jerk of the wheel or a swerve) and the car is thrown sideways
+ *    ([Config.jerkMinLateralMs2]); the driver's body turning is not a jerk.
  *  - HARSH_BRAKING: horizontal acceleration of [Config.harshMs2] (about 0.4 g,
  *    the usual "harsh event" level): hard braking, hard acceleration or swerving.
  *
@@ -51,6 +52,24 @@ class DrivingWatch(val config: Config = Config()) {
         val weavingSwings: Int = 6,
         val weavingWindowSec: Float = 30f,
         val jerkRadS: Float = 0.4f,
+        /**
+         * A jerk of the wheel throws the car sideways; the driver's body turning (a phone in a shirt
+         * or jacket pocket at a shoulder check) does not, even in a bend or while braking. So a
+         * turn-rate jump is a jerk only if the sideways acceleration (0.5 s mean) changes by this much
+         * from just before it, within [jerkLateralSec] (0: no such check). "Sideways" is across the
+         * car's forward axis once that is learned (see [forwardMinMs2]); until then the whole
+         * horizontal acceleration.
+         */
+        val jerkMinLateralMs2: Float = 1f,
+        val jerkLateralSec: Float = 1f,
+        /**
+         * A swing this fast whose sideways acceleration changes less than [jerkMinLateralMs2] is the
+         * driver's body turning, not the car: it is not a weaving swing (Float.MAX_VALUE: off).
+         */
+        val bodyTurnRadS: Float = 0.3f,
+        /** On a straight road (turn rate below [straightRadS] for 1 s), braking or pulling away by this much shows the forward axis. */
+        val forwardMinMs2: Float = 0.8f,
+        val straightRadS: Float = 0.03f,
         val harshMs2: Float = 4f,
         val eventsForErratic: Int = 3,
         val eventsWindowSec: Float = 300f,
@@ -71,7 +90,15 @@ class DrivingWatch(val config: Config = Config()) {
         val restingRadS: Float = 0.15f,
         /** ...for this long (put in a holder), or the screen goes off. */
         val restingSec: Float = 10f
-    )
+    ) {
+        companion object {
+            /**
+             * "Test drive (no car)": turning on a swivel chair is the body turning with no sideways
+             * acceleration, which a real drive ignores. So the test judges the turn rate alone.
+             */
+            fun forTestDrive() = Config(jerkMinLateralMs2 = 0f, bodyTurnRadS = Float.MAX_VALUE)
+        }
+    }
 
     private val dt = 0.02f
     private fun alpha(tauSec: Float) = (1 - exp(-dt / tauSec)).toFloat()
@@ -97,10 +124,30 @@ class DrivingWatch(val config: Config = Config()) {
     private var jerkI = 0
     private var samples = 0
 
+    /** Sign of the swing in progress; [keptSign]: of the last swing that counts (counted swings alternate). */
     private var lobeSign = 0
+    private var keptSign = 0
+    private var lobeCounted = false
+    private var lobePeak = 0f
+    /** How far the sideways acceleration moved during the swing in progress, from its start. */
+    private var lobeSideMax = 0f
+    private val lobeStart = FloatArray(3)
     private val lobes = ArrayDeque<Long>()
+    /** The car's forward axis in the phone's frame (an axis: braking and pulling away agree). */
+    private val fwd = FloatArray(3)
+    private var fwdEvidence = 0
+    private var straightSince = Long.MIN_VALUE
+    private val aFwd = alpha(2f)
     private val events = ArrayDeque<DrivingEvent>()
     private var lastJerkT = Long.MIN_VALUE
+    /** A turn-rate jump waiting for the sideways acceleration that makes it a jerk of the wheel. */
+    private var pendingJerkT = Long.MIN_VALUE
+    private var pendingJerkSize = 0f
+    private val pendingBase = FloatArray(3)
+    /** The last 0.5 s of the horizontal acceleration vector: the "just before" of a turn-rate jump. */
+    private val hBuf = FloatArray(25 * 3)
+    private var hI = 0
+    private var hN = 0
     private var lastHarshT = Long.MIN_VALUE
 
     // Phone handling: own filters, never reset while the phone is being moved.
@@ -141,13 +188,13 @@ class DrivingWatch(val config: Config = Config()) {
     fun reset() {
         started = false; samples = 0
         yawSlow = 0f; yawFast = 0f; mean.fill(0f); up.fill(0f); g0 = 0f
-        jerkN = 0; jerkI = 0
-        lobeSign = 0; lobes.clear()
+        jerkN = 0; jerkI = 0; pendingJerkT = Long.MIN_VALUE; hN = 0; hI = 0
+        lobeSign = 0; keptSign = 0; lobeCounted = false; lobes.clear(); straightSince = Long.MIN_VALUE
     }
 
-    /** Forgets the events too (a new trip). */
+    /** Forgets the events and the phone's place in the car too (a new trip). */
     fun clear() {
-        reset(); events.clear()
+        reset(); events.clear(); fwdEvidence = 0
         hSamples = 0; tiltFast = 0f; tiltRest = 0f; handledT = Long.MIN_VALUE; inHand = false
         restingSince = Long.MIN_VALUE; handledNow = false
     }
@@ -158,7 +205,7 @@ class DrivingWatch(val config: Config = Config()) {
      */
     fun processSample(t: Long, s: FloatArray, hasGyro: Boolean, screenOn: Boolean = false): DrivingEvent? {
         handledNow = handled(t, s, hasGyro, screenOn)
-        if (handledNow) { reset(); return null } // judged again from a fresh start once it settles
+        if (handledNow) { reset(); fwdEvidence = 0; return null } // moved: a fresh start (and a new forward axis) once it settles
         if (!started) {
             g[0] = s[0]; g[1] = s[1]; g[2] = s[2]
             mean[0] = s[0]; mean[1] = s[1]; mean[2] = s[2]
@@ -174,7 +221,9 @@ class DrivingWatch(val config: Config = Config()) {
         val settled = samples > 150
 
         // Horizontal acceleration: length of the 0.5 s mean vector against gravity's length.
-        for (i in 0 until 3) { mean[i] += aMean * (s[i] - mean[i]); up[i] += aUp * (s[i] - up[i]) }
+        // "Up" starts as the plain average so far (not the first sample's vibration), then a 20 s mean.
+        val aU = maxOf(aUp, 1f / samples)
+        for (i in 0 until 3) { mean[i] += aMean * (s[i] - mean[i]); up[i] += aU * (s[i] - up[i]) }
         val m2 = mean[0] * mean[0] + mean[1] * mean[1] + mean[2] * mean[2]
         val m = sqrt(m2)
         g0 = if (g0 == 0f) m else g0 + aG0 * (m - g0) // learns the sensor's own 1 g
@@ -185,6 +234,9 @@ class DrivingWatch(val config: Config = Config()) {
         val upN = sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).coerceAtLeast(1e-3f)
         val vertical = (mean[0] * up[0] + mean[1] * up[1] + mean[2] * up[2]) / upN
         val h = minOf(sqrt(maxOf(0f, m2 - g0 * g0)), sqrt(maxOf(0f, m2 - vertical * vertical)))
+        // The horizontal acceleration as a vector (for the forward and sideways axes).
+        val vu = vertical / upN
+        val hx = mean[0] - vu * up[0]; val hy = mean[1] - vu * up[1]; val hz = mean[2] - vu * up[2]
         if (settled && h >= config.harshMs2 && cooledDown(t, lastHarshT)) {
             lastHarshT = t
             event = DrivingEvent(t, DrivingEventType.HARSH_BRAKING, h)
@@ -198,8 +250,16 @@ class DrivingWatch(val config: Config = Config()) {
             jerkBuf[jerkI] = yawFast
             jerkI = (jerkI + 1) % jerkBuf.size
             if (jerkN < jerkBuf.size) jerkN++
+            if (settled) learnForward(t, y, hx, hy, hz)
+            // The horizontal acceleration 0.5 s ago (the oldest in the ring).
+            val o = if (hN < 25) 0 else hI
+            val bx = if (hN == 0) hx else hBuf[3 * o]
+            val by = if (hN == 0) hy else hBuf[3 * o + 1]
+            val bz = if (hN == 0) hz else hBuf[3 * o + 2]
+            hBuf[3 * hI] = hx; hBuf[3 * hI + 1] = hy; hBuf[3 * hI + 2] = hz
+            hI = (hI + 1) % 25; if (hN < 25) hN++
             if (settled) {
-                event = weaving(t, y) ?: jerk(t) ?: event
+                event = weaving(t, y, hx, hy, hz) ?: jerk(t, hx, hy, hz, bx, by, bz) ?: event
             }
         }
         if (event != null) events.addLast(event)
@@ -255,31 +315,109 @@ class DrivingWatch(val config: Config = Config()) {
     private fun cooledDown(t: Long, last: Long) =
         last == Long.MIN_VALUE || t - last >= (config.cooldownSec * 1e9f).toLong()
 
-    /** Counts alternating turn swings; a weaving episode once enough happen within the window. */
-    private fun weaving(t: Long, y: Float): DrivingEvent? {
+    /** Known once braking or pulling away on a straight road was seen for 0.5 s. */
+    private val forwardKnown get() = fwdEvidence >= 25
+
+    /** On a straight road the horizontal acceleration (braking, pulling away) lies along the forward axis. */
+    private fun learnForward(t: Long, y: Float, hx: Float, hy: Float, hz: Float) {
+        if (kotlin.math.abs(y) >= config.straightRadS) { straightSince = Long.MIN_VALUE; return }
+        if (straightSince == Long.MIN_VALUE) straightSince = t
+        val n = sqrt(hx * hx + hy * hy + hz * hz)
+        if (t - straightSince < secs(1f) || n < config.forwardMinMs2 || n > 2 * config.harshMs2) return
+        var ux = hx / n; var uy = hy / n; var uz = hz / n
+        if (fwdEvidence > 0 && ux * fwd[0] + uy * fwd[1] + uz * fwd[2] < 0) { ux = -ux; uy = -uy; uz = -uz }
+        if (fwdEvidence == 0) { fwd[0] = ux; fwd[1] = uy; fwd[2] = uz }
+        else {
+            fwd[0] += aFwd * (ux - fwd[0]); fwd[1] += aFwd * (uy - fwd[1]); fwd[2] += aFwd * (uz - fwd[2])
+            val f = sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]).coerceAtLeast(1e-6f)
+            fwd[0] /= f; fwd[1] /= f; fwd[2] /= f
+        }
+        fwdEvidence++
+    }
+
+    private val lat = FloatArray(3)
+
+    /** The car's sideways axis (up x forward) into [lat]; false while the forward axis is unknown. */
+    private fun lateralAxis(): Boolean {
+        if (!forwardKnown) return false
+        val lx = up[1] * fwd[2] - up[2] * fwd[1]
+        val ly = up[2] * fwd[0] - up[0] * fwd[2]
+        val lz = up[0] * fwd[1] - up[1] * fwd[0]
+        val n = sqrt(lx * lx + ly * ly + lz * lz)
+        if (n < 1e-3f) return false
+        lat[0] = lx / n; lat[1] = ly / n; lat[2] = lz / n
+        return true
+    }
+
+    /**
+     * How much the car was pushed sideways between two horizontal accelerations: across the forward
+     * axis once it is known (braking then does not count), else the whole change. A vector change,
+     * smooth, unlike the difference of two lengths of about 1 g.
+     */
+    private fun sideChange(ax: Float, ay: Float, az: Float, bx: Float, by: Float, bz: Float): Float {
+        val dx = ax - bx; val dy = ay - by; val dz = az - bz
+        if (lateralAxis()) return kotlin.math.abs(dx * lat[0] + dy * lat[1] + dz * lat[2])
+        return sqrt(dx * dx + dy * dy + dz * dz)
+    }
+
+    /**
+     * Counts alternating turn swings; a weaving episode once enough happen within the window. A
+     * fast swing with no sideways acceleration (the driver's body turning, for example a shoulder
+     * check with the phone in a shirt pocket) is dropped when it ends, and does not split a swing.
+     */
+    private fun weaving(t: Long, y: Float, hx: Float, hy: Float, hz: Float): DrivingEvent? {
+        if (lobeSign != 0) {
+            lobePeak = maxOf(lobePeak, kotlin.math.abs(y))
+            lobeSideMax = maxOf(lobeSideMax, sideChange(hx, hy, hz, lobeStart[0], lobeStart[1], lobeStart[2]))
+        }
         val sign = when {
             y >= config.swingRadS -> 1
             y <= -config.swingRadS -> -1
             else -> 0
         }
         if (sign == 0 || sign == lobeSign) return null
+        // The swing that just ended: the body, not the car?
+        if (lobeCounted && lobePeak >= config.bodyTurnRadS && lobeSideMax < config.jerkMinLateralMs2) {
+            lobes.removeLastOrNull()
+            keptSign = if (lobes.isEmpty()) 0 else -keptSign
+        }
         lobeSign = sign
+        lobePeak = kotlin.math.abs(y); lobeSideMax = 0f
+        lobeStart[0] = hx; lobeStart[1] = hy; lobeStart[2] = hz
+        lobeCounted = sign != keptSign
+        if (!lobeCounted) return null // the same swing goes on after a body turn
+        keptSign = sign
         lobes.addLast(t)
         val window = (config.weavingWindowSec * 1e9f).toLong()
         while (lobes.isNotEmpty() && t - lobes.first() > window) lobes.removeFirst()
         if (lobes.size < config.weavingSwings) return null
         val swings = lobes.size
         lobes.clear()
+        lobeCounted = false
         return DrivingEvent(t, DrivingEventType.WEAVING, swings.toFloat())
     }
 
-    private fun jerk(t: Long): DrivingEvent? {
+    /** [hx, hy, hz]: horizontal acceleration now (0.5 s mean); [bx, by, bz]: 0.5 s ago. */
+    private fun jerk(t: Long, hx: Float, hy: Float, hz: Float, bx: Float, by: Float, bz: Float): DrivingEvent? {
+        if (pendingJerkT != Long.MIN_VALUE) {
+            // The turn rate jumped: a jerk of the wheel once the car is seen thrown sideways.
+            if (sideChange(hx, hy, hz, pendingBase[0], pendingBase[1], pendingBase[2]) >= config.jerkMinLateralMs2) {
+                pendingJerkT = Long.MIN_VALUE
+                return DrivingEvent(t, DrivingEventType.JERKY_STEERING, pendingJerkSize)
+            }
+            if (t - pendingJerkT > secs(config.jerkLateralSec)) pendingJerkT = Long.MIN_VALUE // the body turned, not the car
+            return null
+        }
         if (jerkN < jerkBuf.size || !cooledDown(t, lastJerkT)) return null
         var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
         for (x in jerkBuf) { if (x < lo) lo = x; if (x > hi) hi = x }
         if (hi - lo < config.jerkRadS) return null
         lastJerkT = t
-        return DrivingEvent(t, DrivingEventType.JERKY_STEERING, hi - lo)
+        if (sideChange(hx, hy, hz, bx, by, bz) >= config.jerkMinLateralMs2) return DrivingEvent(t, DrivingEventType.JERKY_STEERING, hi - lo)
+        pendingJerkT = t
+        pendingJerkSize = hi - lo
+        pendingBase[0] = bx; pendingBase[1] = by; pendingBase[2] = bz
+        return null
     }
 
     private fun prune(t: Long) {

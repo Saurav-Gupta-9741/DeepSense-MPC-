@@ -129,7 +129,9 @@ data class FitToDriveReport(
     /** Normal-balance recordings needed (and kept: newer ones replace the oldest). */
     val balanceReferencesNeeded: Int,
     val lastBalance: BalanceResult?,
-    val advice: FitAdvice
+    val advice: FitAdvice,
+    /** "Test drive (no car)" running: seconds left (0: not running). */
+    val testDriveSecondsLeft: Int = 0
 )
 
 sealed interface FitToDriveEvent {
@@ -151,7 +153,11 @@ sealed interface FitToDriveEvent {
      * warning or an unusual walk (the lower bar: the contact alert counts down at once). Otherwise every
      * trip is watched with a higher bar ([FitToDriveMonitor.watchEveryTrip]) and the driver is asked first.
      */
-    class ErraticDriving(val events: List<DrivingEvent>, val warned: Boolean = true) : FitToDriveEvent
+    class ErraticDriving(val events: List<DrivingEvent>, val warned: Boolean = true,
+                         /** During a "Test drive (no car)": the alert says TEST and never counts as a real one. */
+                         val test: Boolean = false) : FitToDriveEvent
+    /** A "Test drive (no car)" ran out; [asked]: unsteady driving was noticed during it. */
+    class TestDriveEnded(val asked: Boolean) : FitToDriveEvent
     /** Every analysed walking segment, with its distance from normal (NaN while learning): study log. */
     class SegmentMeasured(val segment: GaitSegment, val distance: Float) : FitToDriveEvent
     /** Check my walk: too little walking recorded in its 30 s, it goes on until there is enough (spoken: keep walking). */
@@ -237,6 +243,8 @@ class FitToDriveMonitor(
         val erraticCooldownSec: Float = 600f,
         /** "I'm OK" (asked after unsteady driving with no warning): not asked again on this trip for this long. */
         val driverOkSec: Float = 900f,
+        /** "Test drive (no car)": the driving watch runs as if in a vehicle for this long. */
+        val testDriveSec: Float = 300f,
         /** The guided set-up walk gives up after this long. */
         /** The set-up walk ends by itself once enough walking is recorded; it gives up after this long. */
         val walkSessionSec: Float = 300f,
@@ -282,6 +290,8 @@ class FitToDriveMonitor(
     /** The running balance test is "Test it" C: its result never arms the driving watch. */
     private var balancePractice = false
     val drivingWatch = DrivingWatch()
+    /** "Test drive (no car)": its own watch, judging the turn rate alone (a swivel chair has no sideways force). */
+    private val testDriveWatch = DrivingWatch(DrivingWatch.Config.forTestDrive())
     private val references = ArrayList<BalanceReference>()
 
     var enabled = false
@@ -316,6 +326,12 @@ class FitToDriveMonitor(
      * on (the user opted in to a safety net); the bar is higher and the driver is asked first.
      */
     var watchEveryTrip = false
+    /**
+     * "Test drive (no car)": until then the driving watch runs as if in a vehicle, on the phone's
+     * real sensors (turning left and right on a swivel chair looks like weaving to the gyroscope).
+     */
+    private var testDriveUntil = Long.MIN_VALUE
+    private var testDriveAsked = false
     private var inVehicleNow = false
     private var walkSessionStart = Long.MIN_VALUE
     /** The current advice came from a "Test it" practice test: it never reminds or alerts anyone. */
@@ -369,7 +385,7 @@ class FitToDriveMonitor(
         if (on == enabled) return
         enabled = on
         extractor.reset(); recent.clear(); waitUntil = Long.MIN_VALUE; practice = null
-        if (!on) { advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cautionT = Long.MIN_VALUE; cancelBalanceTest(); stopWalkRecording() }
+        if (!on) { advice = FitAdvice.NONE; warnedT = Long.MIN_VALUE; cautionT = Long.MIN_VALUE; cancelBalanceTest(); stopWalkRecording(); stopTestDrive() }
     }
 
     /** Status of the learned walk in use ([current] position). */
@@ -409,7 +425,7 @@ class FitToDriveMonitor(
     }
 
     /** Sensor data is missing: never build a segment across the hole. */
-    fun onGap() { extractor.reset(); drivingWatch.reset() }
+    fun onGap() { extractor.reset(); drivingWatch.reset(); testDriveWatch.reset() }
 
     /**
      * Every uniform 50 Hz sample. [walking]: the displayed activity is WALKING.
@@ -427,7 +443,12 @@ class FitToDriveMonitor(
             advice = FitAdvice.NONE
         }
         if (!enabled) return
-        watchDriving(t, s, hasGyro, inVehicle, screenOn)
+        if (testDriveUntil != Long.MIN_VALUE && t >= testDriveUntil) {
+            testDriveUntil = Long.MIN_VALUE
+            testDriveWatch.clear()
+            onEvent(FitToDriveEvent.TestDriveEnded(testDriveAsked))
+        }
+        watchDriving(t, s, hasGyro, inVehicle || testDriveUntil != Long.MIN_VALUE, screenOn)
         if (walkSessionActive) walkSessionClock(t)
         walkingNow = walking
         inPocketNow = inPocket
@@ -530,6 +551,27 @@ class FitToDriveMonitor(
      * on this trip. A warning's lower bar is not affected (the walk already said otherwise).
      */
     fun driverOk(t: Long) { driverOkUntil = t + secs(config.driverOkSec) }
+
+    /**
+     * "Test drive (no car)" for [Config.testDriveSec]: a fresh trip for the driving watch, without the
+     * walk check, watched with the every-trip bar even if the contact alert is off. False if off.
+     */
+    fun startTestDrive(t: Long): Boolean {
+        if (!enabled) return false
+        testDriveUntil = t + secs(config.testDriveSec)
+        testDriveAsked = false
+        passengerConfirmed = false
+        driverOkUntil = Long.MIN_VALUE
+        lastErraticT = Long.MIN_VALUE
+        testDriveWatch.clear()
+        return true
+    }
+
+    fun stopTestDrive() {
+        if (testDriveUntil == Long.MIN_VALUE) return
+        testDriveUntil = Long.MIN_VALUE
+        testDriveWatch.clear()
+    }
 
     /** A car audio / hands-free Bluetooth device connected: usually before the car moves. */
     fun onCarBluetooth(t: Long) {
@@ -781,7 +823,9 @@ class FitToDriveMonitor(
         balanceReferences = references.size,
         balanceReferencesNeeded = config.balanceReferences,
         lastBalance = lastBalance,
-        advice = advice
+        advice = advice,
+        testDriveSecondsLeft = if (testDriveUntil == Long.MIN_VALUE || t >= testDriveUntil) 0
+            else kotlin.math.ceil((testDriveUntil - t) / 1e9).toInt()
     )
 
     // ------------------------------------------------------------------ internals
@@ -812,21 +856,24 @@ class FitToDriveMonitor(
      * (the driver is asked first), unless the driver said "I'm OK" or "I'm a passenger".
      */
     private fun watchDriving(t: Long, s: FloatArray, hasGyro: Boolean, inVehicle: Boolean, screenOn: Boolean) {
+        val test = testDriveUntil != Long.MIN_VALUE
+        val watch = if (test) testDriveWatch else drivingWatch
         if (!inVehicle) {
-            if (inVehicleNow) drivingWatch.reset() // a stop within the trip: keep the events seen so far
+            if (inVehicleNow) watch.reset() // a stop within the trip: keep the events seen so far
             inVehicleNow = false
             return
         }
         inVehicleNow = true
-        val e = drivingWatch.processSample(t, s, hasGyro, screenOn) ?: return
+        val e = watch.processSample(t, s, hasGyro, screenOn) ?: return
         if (passengerConfirmed) return
         val warned = drivingArmed(t)
-        val erratic = if (warned) drivingWatch.erratic(t)
-            else watchEveryTrip && (driverOkUntil == Long.MIN_VALUE || t >= driverOkUntil) && drivingWatch.clearlyErratic(t)
+        val erratic = if (warned) watch.erratic(t)
+            else (watchEveryTrip || test) && (driverOkUntil == Long.MIN_VALUE || t >= driverOkUntil) && watch.clearlyErratic(t)
         if (!erratic) return
         if (lastErraticT != Long.MIN_VALUE && t - lastErraticT < secs(config.erraticCooldownSec)) return
         lastErraticT = t
-        onEvent(FitToDriveEvent.ErraticDriving(drivingWatch.recentEvents(e.tNanos), warned))
+        if (test) testDriveAsked = true
+        onEvent(FitToDriveEvent.ErraticDriving(watch.recentEvents(e.tNanos), warned, test))
     }
 
     /**

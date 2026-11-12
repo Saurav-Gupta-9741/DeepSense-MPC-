@@ -306,6 +306,115 @@ class DrivingWatchTest {
         }
     }
 
+    // ---------------------------------------------------------------- wherever the phone is
+
+    /**
+     * Where the phone is, in the car or on the driver: its orientation, what else moves it (in the
+     * car frame, before turning it into the phone's frame) and how much it rattles.
+     */
+    private class Placement(val name: String, val r: Array<FloatArray>,
+                            val body: (Double, FloatArray) -> Unit = { _, _ -> }, val rattle: Float = 0f) {
+        fun apply(base: Recording, seed: Int): Recording {
+            val rnd = Random(seed.toLong())
+            val moved = Recording(base.t.copyOf(), Array(base.size) { i -> base.data[i].copyOf().also { body(base.t[i] / 1e9, it) } })
+            val turned = moved.rotated(r)
+            if (rattle == 0f) return turned
+            // Rattling is fast (a phone loose in a cup holder buzzes at 10-25 Hz), with some road noise.
+            return Recording(turned.t, Array(turned.size) { i ->
+                val ts = turned.t[i] / 1e9
+                turned.data[i].copyOf().also { d ->
+                    for (k in 0..2) d[k] += (rattle * (sin(2 * PI * 13 * ts + k) + 0.6 * sin(2 * PI * 21 * ts + 2 * k)) +
+                        0.05 * rnd.nextGaussian()).toFloat()
+                    for (k in 3..5) d[k] += (0.3 * rattle * (sin(2 * PI * 17 * ts + k) + 0.5 * sin(2 * PI * 23 * ts + k))).toFloat()
+                }
+            })
+        }
+    }
+
+    /** The upper body: it sways (roll) and turns to check the mirrors over the shoulder every 20 s. */
+    private val torso: (Double, FloatArray) -> Unit = { ts, d ->
+        d[3] += (0.12 * sin(2 * PI * 0.3 * ts)).toFloat()
+        val p = ts % 20.0
+        d[5] += (bump(p, 10.0, 0.7, 0.7) - bump(p, 10.7, 0.7, 0.7)).toFloat()
+    }
+
+    private val placements = listOf(
+        Placement("trouser pocket", Recording.rotation(40.0, 70.0, 10.0)), // drive() moves the leg on the pedals
+        Placement("shirt or jacket pocket", Recording.rotation(0.0, -85.0, 0.0), body = torso),
+        Placement("belt or waist", Recording.rotation(90.0, 0.0, 85.0)),
+        Placement("bag on the seat or floor", Recording.rotation(-120.0, 15.0, 160.0)),
+        Placement("cup holder or door pocket", Recording.rotation(10.0, 80.0, 0.0), rattle = 1f),
+        Placement("dashboard holder", Recording.rotation(0.0, -75.0, 0.0), rattle = 0.3f),
+        Placement("lying on the seat", Recording.rotation(30.0, 0.0, 0.0))
+    )
+
+    @Test
+    fun cityDrivingIsNeverErraticWhereverThePhoneIs() {
+        for ((k, p) in placements.withIndex()) {
+            val w = DrivingWatch()
+            val rec = p.apply(cityDrive(seed = 80 + k), seed = 90 + k)
+            val events = run(w, rec)
+            assertFalse("${p.name}: ${events.map { "${it.type}@${it.tNanos / 1_000_000_000}s" }}", w.erratic(rec.t.last()))
+            assertFalse(p.name, w.clearlyErratic(rec.t.last()))
+        }
+    }
+
+    @Test
+    fun aMinuteOfWeavingIsCaughtWhereverThePhoneIs() {
+        for ((k, p) in placements.withIndex()) {
+            val w = DrivingWatch()
+            val rec = p.apply(Recording.concat(drive(20.0, seed = 100 + k) { 0.0 }, weavingDrive(75.0, seed = 110 + k)), seed = 120 + k)
+            val events = run(w, rec)
+            assertTrue("${p.name}: ${events.map { it.type }}", w.clearlyErratic(rec.t.last()))
+        }
+    }
+
+    @Test
+    fun shoulderChecksWithThePhoneInAShirtPocketAreNotJerkySteering() {
+        // Calm driving for 5 minutes, a look over the shoulder every 20 s (the torso turns at 0.7 rad/s).
+        val rec = placements[1].apply(drive(300.0, seed = 130) { 0.0 }, seed = 131)
+        // The control: judged on the turn rate alone (before v3.8), the body turning made the drive erratic.
+        val before = DrivingWatch(DrivingWatch.Config(jerkMinLateralMs2 = 0f))
+        val old = run(before, rec)
+        assertTrue(old.map { it.type }.toString(), before.erratic(rec.t.last()))
+        val w = DrivingWatch()
+        val events = run(w, rec)
+        assertTrue(events.map { "${it.type}@${it.tNanos / 1_000_000_000}s" }.toString(), events.none { it.type == DrivingEventType.JERKY_STEERING })
+        assertFalse(w.erratic(rec.t.last()))
+    }
+
+    @Test
+    fun aRealSwerveIsStillJerkySteeringWhereverThePhoneIs() {
+        for ((k, p) in placements.withIndex()) {
+            val w = DrivingWatch()
+            // Straight, then a swerve (0.9 rad/s and back at 5 m/s) at 15 s.
+            val rec = p.apply(drive(30.0, seed = 140 + k, speed = 5.0) { ts -> bump(ts, 15.0, 0.8, 0.9) }, seed = 150 + k)
+            val events = run(w, rec)
+            assertTrue("${p.name}: ${events.map { it.type }}", events.any { it.type == DrivingEventType.JERKY_STEERING })
+        }
+    }
+
+    /** A swivel chair (no car): turning left and right every [periodSec]/2 s, about ±30°; no sideways acceleration. */
+    private fun swivelChair(seconds: Double, periodSec: Double = 2.0, seed: Int = 160) =
+        drive(seconds, seed, speed = 0.0) { ts -> 1.0 * sin(2 * PI * ts / periodSec) }
+
+    @Test
+    fun turningOnASwivelChairLooksLikeWeavingToTheTestDrive() {
+        // "Test drive (no car)": the phone in a trouser pocket, the person turns the chair for a minute.
+        val rec = Recording.concat(Recording.constant(20.0, 0f, 0f, 9.81f, noise = 0.05f), swivelChair(60.0)).rotated(placements[0].r)
+        val w = DrivingWatch(DrivingWatch.Config.forTestDrive())
+        val events = run(w, rec)
+        assertTrue(events.map { it.type }.toString(), w.clearlyErratic(rec.t.last()))
+        // On a real trip the same turning is the body (no sideways force), never weaving.
+        val real = DrivingWatch()
+        val realEvents = run(real, rec)
+        assertTrue(realEvents.map { it.type }.toString(), realEvents.none { it.type == DrivingEventType.WEAVING })
+        // Sitting still for 5 minutes asks nothing.
+        val still = DrivingWatch(DrivingWatch.Config.forTestDrive())
+        val quiet = Recording.constant(300.0, 0f, 0f, 9.81f, noise = 0.05f).rotated(placements[0].r)
+        assertTrue(run(still, quiet).isEmpty())
+    }
+
     @Test
     fun threeHardBrakesAreNotClearlyErraticSixAre() {
         val brakes = { times: List<Double> -> drive(280.0, seed = 60, fwd = { ts -> -times.sumOf { bump(ts, it, 2.0, 6.5) } }) { 0.0 } }

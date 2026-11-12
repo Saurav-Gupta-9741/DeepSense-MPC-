@@ -121,6 +121,7 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.switchAlertContact.isChecked = FitToDriveStore.alertContact(this) && ContactAlert.hasSmsPermission(this)
         binding.btnTestAlert.visibility = if (binding.switchAlertContact.isChecked) View.VISIBLE else View.GONE
         binding.rowAlertCall.visibility = binding.btnTestAlert.visibility
+        binding.btnTestDrive.visibility = binding.btnTestAlert.visibility
         binding.switchAlertCall.isChecked = FitToDriveStore.alertCall(this) && ContactAlert.hasCallPermission(this)
         studyShown = FitToDriveStore.studyCondition(this) != StudyCondition.OFF
         binding.etContactName.setText(FitToDriveStore.contactName(this))
@@ -143,6 +144,16 @@ class FitToDriveActivity : AppCompatActivity() {
             if (bindingUi) return@setOnCheckedChangeListener
             if (on && !ContactAlert.hasCallPermission(this)) callPermission.launch(Manifest.permission.CALL_PHONE)
             else setAlertCall(on)
+        }
+        binding.btnTestDrive.setOnClickListener {
+            if ((lastReport?.testDriveSecondsLeft ?: 0) > 0) {
+                SensingRepository.stopTestDrive()
+                say(getString(R.string.fit_say_test_drive_stopped))
+            } else {
+                askToRunInBackground()
+                SensingRepository.startTestDrive()
+                say(getString(R.string.fit_say_test_drive_start))
+            }
         }
         binding.btnTestAlert.setOnClickListener {
             askToRunInBackground()
@@ -337,6 +348,7 @@ class FitToDriveActivity : AppCompatActivity() {
         bindingUi = false
         binding.btnTestAlert.visibility = if (on) View.VISIBLE else View.GONE
         binding.rowAlertCall.visibility = binding.btnTestAlert.visibility
+        binding.btnTestDrive.visibility = binding.btnTestAlert.visibility
         renderKeepRunning()
         if (on) askToRunInBackground()
         SensingRepository.refreshFitSettings()
@@ -566,6 +578,8 @@ class FitToDriveActivity : AppCompatActivity() {
             cardTest.visibility = View.GONE // "Test it" removed: Check my walk is the test
         }
 
+        btnTestDrive.text = if (f.testDriveSecondsLeft > 0) getString(R.string.fit_test_drive_stop, clock(f.testDriveSecondsLeft.toFloat()))
+            else getString(R.string.fit_test_drive)
         btnRecordAgain.visibility = if (f.balanceReferences >= f.balanceReferencesNeeded) View.VISIBLE else View.GONE
         btnRecordAgain.isEnabled = canAct
         btnReset.isEnabled = running && !busy
@@ -594,6 +608,7 @@ class FitToDriveActivity : AppCompatActivity() {
             !running -> getString(R.string.hero_starting) to R.color.text_muted
             !enabled -> getString(R.string.fit_disabled_hint) to R.color.text_muted
             f == null || f.balanceRunning -> null to 0
+            f.testDriveSecondsLeft > 0 -> getString(R.string.fit_test_drive_banner, clock(f.testDriveSecondsLeft.toFloat())) to R.color.primary_glow
             f.learningPaused -> getString(R.string.fit_study_paused) to R.color.accent_amber
             f.watchingDriving || (f.recentlyWarned && f.advice == FitAdvice.NONE) ->
                 getString(R.string.fit_watching_driving) to R.color.accent_amber
@@ -624,8 +639,8 @@ class FitToDriveActivity : AppCompatActivity() {
         cardAlert.visibility = if (a != null) View.VISIBLE else View.GONE
         if (a == null) return@with
         val asking = a.kind == AlertKind.UNSTEADY_DRIVING
-        tvAlertTitle.text = getString(if (asking) R.string.fit_alert_ask_card_title else R.string.fit_alert_title,
-            a.contactName, a.secondsLeft)
+        tvAlertTitle.text = (if (a.test) getString(R.string.fit_test_drive_tag) else "") +
+            getString(if (asking) R.string.fit_alert_ask_card_title else R.string.fit_alert_title, a.contactName, a.secondsLeft)
         tvAlertDetail.text = ContactAlert.detailText(this@FitToDriveActivity, a.kind, a.contactName)
         btnAlertOk.visibility = if (asking) View.VISIBLE else View.GONE
         btnAlertCancel.setText(if (a.kind == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel)
