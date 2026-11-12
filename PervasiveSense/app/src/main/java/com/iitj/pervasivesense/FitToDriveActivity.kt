@@ -42,6 +42,8 @@ class FitToDriveActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_START_BALANCE = "com.iitj.pervasivesense.extra.START_BALANCE"
         const val EXTRA_DISMISS = "com.iitj.pervasivesense.extra.DISMISS_FIT"
+        /** "Check my walk" on the dashboard card: start the check as soon as this screen opens. */
+        const val EXTRA_CHECK_NOW = "com.iitj.pervasivesense.extra.CHECK_NOW"
     }
 
     /** "Test it" results, kept while the app runs (the screen is often closed during a test walk). */
@@ -173,8 +175,7 @@ class FitToDriveActivity : AppCompatActivity() {
         binding.btnStep3.setOnClickListener { focusContact() }
         binding.btnCheckNow.setOnClickListener {
             if (lastReport?.walkSession == true) { stopRecording(); return@setOnClickListener }
-            SensingRepository.requestFitCheck()
-            say(getString(checkHow(lastReport, spoken = true)))
+            checkNow()
         }
         binding.btnSettingsToggle.setOnClickListener { showSettings(binding.cardSettings.visibility != View.VISIBLE) }
         binding.btnBalanceCheck.setOnClickListener { startBalance(BalancePurpose.CHECK) }
@@ -264,8 +265,16 @@ class FitToDriveActivity : AppCompatActivity() {
         if (intent == null) return
         if (intent.getBooleanExtra(EXTRA_START_BALANCE, false)) startBalance(BalancePurpose.CHECK)
         if (intent.getBooleanExtra(EXTRA_DISMISS, false)) SensingRepository.dismissFitAdvice()
+        if (intent.getBooleanExtra(EXTRA_CHECK_NOW, false) && SensingRepository.status.value == ServiceStatus.RUNNING) checkNow()
         intent.removeExtra(EXTRA_START_BALANCE)
         intent.removeExtra(EXTRA_DISMISS)
+        intent.removeExtra(EXTRA_CHECK_NOW)
+    }
+
+    /** "Check my walk": scores the walking of the next 30 s; the phone says how to walk. */
+    private fun checkNow() {
+        SensingRepository.requestFitCheck()
+        say(getString(checkHow(lastReport, spoken = true)))
     }
 
     // ------------------------------------------------------------------ actions

@@ -423,3 +423,13 @@ screen and voice tell the user to walk that way. A wobbly walk then gets its ful
   minute) can be asked about; the driver answers "I'm OK". Android 14 opens the alert over the lock
   screen only if the full-screen permission is allowed (the **Fix** button opens it); otherwise it
   is a heads-up notification plus the spoken question.
+
+## v3.7: Fit to drive first on the dashboard
+
+The Fit to drive card is now the first and largest card on the dashboard. It shows one large
+headline for the state that matters now (Not turned on, Finish set-up, Ready, Normal for you,
+Better not to drive now, Not watching when sensing is stopped), one line of detail (for example
+the time and trigger of the last check), whether every drive is watched and who would be alerted,
+and one large button for the next step: Turn on, Continue set-up, Check my walk (starts the check
+on the Fit to drive screen), Balance check, Find a cab or Start sensing. The border takes the
+state's colour. No button is offered while in a vehicle.

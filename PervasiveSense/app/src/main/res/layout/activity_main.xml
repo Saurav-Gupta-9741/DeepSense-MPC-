@@ -70,6 +70,101 @@
             android:paddingEnd="16dp"
             android:paddingBottom="16dp">
 
+            <!-- Fit to drive: the safety feature, first and largest. The border takes the status colour. -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardFit"
+                style="@style/PS.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                app:strokeWidth="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            style="@style/PS.Section"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/card_fit" />
+
+                        <View
+                            android:id="@+id/fitDot"
+                            android:layout_width="12dp"
+                            android:layout_height="12dp"
+                            android:background="@drawable/bg_dot"
+                            android:backgroundTint="@color/text_muted" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvFitHeadline"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/fit_card_head_off"
+                        android:textColor="@color/text_main"
+                        android:textSize="26sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvFitStatus"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/fit_card_off"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvFitWatch"
+                        style="@style/PS.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textSize="13sp"
+                        android:visibility="gone" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnFitAction"
+                            android:layout_width="0dp"
+                            android:layout_height="56dp"
+                            android:layout_weight="1"
+                            android:text="@string/fit_card_action_on"
+                            android:textColor="@color/bg_dark"
+                            android:textSize="16sp"
+                            app:backgroundTint="@color/primary_cyan"
+                            app:cornerRadius="12dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnFitOpen"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="56dp"
+                            android:layout_marginStart="8dp"
+                            android:text="@string/fit_open"
+                            android:textColor="@color/primary_glow"
+                            app:cornerRadius="12dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- Current activity -->
             <com.google.android.material.card.MaterialCardView
                 style="@style/PS.Card"
@@ -399,68 +494,6 @@
                         android:visibility="gone"
                         app:backgroundTint="@color/accent_amber"
                         app:cornerRadius="12dp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Fit to drive -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardFit"
-                style="@style/PS.Card"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:clickable="true"
-                android:focusable="true">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:padding="16dp">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                style="@style/PS.CardTitle"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/card_fit" />
-
-                            <View
-                                android:id="@+id/fitDot"
-                                android:layout_width="10dp"
-                                android:layout_height="10dp"
-                                android:layout_marginStart="10dp"
-                                android:background="@drawable/bg_dot"
-                                android:backgroundTint="@color/text_muted" />
-                        </LinearLayout>
-
-                        <TextView
-                            android:id="@+id/tvFitStatus"
-                            style="@style/PS.Caption"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="@string/fit_card_off" />
-                    </LinearLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnFitOpen"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/fit_open"
-                        android:textColor="@color/primary_glow" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
