@@ -17,6 +17,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -361,14 +362,36 @@ class FitToDriveActivity : AppCompatActivity() {
     private fun renderKeepRunning() = with(binding) {
         rowKeepRunning.visibility = btnTestAlert.visibility
         if (rowKeepRunning.visibility != View.VISIBLE) return@with
-        val ctx = this@FitToDriveActivity
-        val battery = getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
-        val lock = ContactAlert.canUseFullScreen(ctx)
+        val k = keepRunningChecks()
         fun mark(ok: Boolean) = getString(if (ok) R.string.fit_keep_ok else R.string.fit_keep_missing)
-        var text = getString(R.string.fit_keep_status, mark(battery), mark(lock))
-        if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) text += "\n" + getString(R.string.fit_keep_samsung)
+        var text = getString(R.string.fit_keep_status, mark(k.battery), mark(k.notifications), mark(k.lockScreen), mark(k.popUp))
+        brandTip()?.let { text += "\n" + getString(it) }
         tvKeepRunning.text = text
-        btnKeepRunning.setText(if (battery && lock) R.string.fit_keep_settings else R.string.fit_keep_fix)
+        btnKeepRunning.setText(if (k.all) R.string.fit_keep_settings else R.string.fit_keep_fix)
+    }
+
+    /** What an alert needs from the phone: run in the background, notify loudly, show over the lock screen. */
+    private class KeepRunning(val battery: Boolean, val notifications: Boolean, val lockScreen: Boolean, val popUp: Boolean) {
+        val all get() = battery && notifications && lockScreen && popUp
+    }
+
+    private fun keepRunningChecks(): KeepRunning {
+        val battery = getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
+        // Notifications allowed, and the alert channel not turned down (a muted channel shows no pop-up).
+        val nm = NotificationManagerCompat.from(this)
+        val channel = nm.getNotificationChannel(SensingForegroundService.ALERT_CHANNEL_ID)
+        val notifications = nm.areNotificationsEnabled() &&
+            (channel == null || channel.importance >= android.app.NotificationManager.IMPORTANCE_HIGH)
+        return KeepRunning(battery, notifications, ContactAlert.canUseFullScreen(this), ContactAlert.canOpenOverOtherApps(this))
+    }
+
+    /** Phone makers that block pop-ups or background apps in their own settings, beyond Android's. */
+    private fun brandTip(): Int? = when (Build.MANUFACTURER.lowercase(java.util.Locale.ROOT)) {
+        "samsung" -> R.string.fit_keep_samsung
+        "xiaomi", "redmi", "poco" -> R.string.fit_keep_xiaomi
+        "oppo", "realme", "oneplus" -> R.string.fit_keep_oppo
+        "vivo", "iqoo" -> R.string.fit_keep_vivo
+        else -> null
     }
 
     @SuppressLint("BatteryLife") // a safety alert must run in the background; not a Play Store app
@@ -379,9 +402,15 @@ class FitToDriveActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.fit_battery_hint, Toast.LENGTH_LONG).show()
                 launch(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
             }
+            !keepRunningChecks().notifications ->
+                launch(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
             Build.VERSION.SDK_INT >= 34 && !ContactAlert.canUseFullScreen(this) ->
                 launch(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
-            // Both fine: the app's own settings (Samsung: Battery > Unrestricted).
+            !ContactAlert.canOpenOverOtherApps(this) -> {
+                Toast.makeText(this, R.string.fit_keep_popup_hint, Toast.LENGTH_LONG).show()
+                launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            }
+            // All fine: the app's own settings (the brand's extra switches, see the tip).
             else -> launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         }
     }
@@ -639,11 +668,12 @@ class FitToDriveActivity : AppCompatActivity() {
     private fun renderAlert(a: AlertCountdown?) = with(binding) {
         cardAlert.visibility = if (a != null) View.VISIBLE else View.GONE
         if (a == null) return@with
-        val asking = a.kind == AlertKind.UNSTEADY_DRIVING
+        val asking = ContactAlert.asks(a.kind)
         tvAlertTitle.text = (if (a.test) getString(R.string.fit_test_drive_tag) else "") +
             getString(if (asking) R.string.fit_alert_ask_card_title else R.string.fit_alert_title, a.contactName, a.secondsLeft)
         tvAlertDetail.text = ContactAlert.detailText(this@FitToDriveActivity, a.kind, a.contactName)
         btnAlertOk.visibility = if (asking) View.VISIBLE else View.GONE
+        btnAlertCancel.visibility = if (a.kind == AlertKind.FALL) View.GONE else View.VISIBLE
         btnAlertCancel.setText(if (a.kind == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel)
     }
 

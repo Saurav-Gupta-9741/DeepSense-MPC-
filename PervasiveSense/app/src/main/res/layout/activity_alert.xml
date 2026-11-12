@@ -48,6 +48,18 @@
         app:cornerRadius="16dp" />
 
     <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnAlertScreenHelp"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:layout_marginTop="16dp"
+        android:text="@string/fall_help_now"
+        android:textColor="@color/text_main"
+        android:textSize="18sp"
+        android:visibility="gone"
+        app:backgroundTint="@color/accent_rose"
+        app:cornerRadius="16dp" />
+
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnAlertScreenCancel"
         android:layout_width="match_parent"
         android:layout_height="72dp"

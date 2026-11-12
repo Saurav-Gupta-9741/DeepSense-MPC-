@@ -61,6 +61,7 @@ Simulate with the phone only, onto something soft but firm (sofa cushion or matt
 | # | Do this | Pass if |
 |---|---|---|
 | E1 | **Lock the screen**, hold the phone upright at ~1 m, drop it onto the cushion or a mattress (not a table, books or the floor), **don't touch it for 10 s** | Card shows *Checking impact…*, then **Fall detected** after ~7.5 s; a fall-alert notification appears |
+| E0 | Fall detection card › **Test fall detection** (3 min), then drop as in E1, screen on or off | The phone says *Impact felt…*; with a trusted contact: **TEST · Did you fall? Are you OK?** over the screen, *I'm OK* / *Get help now*; no answer in 60 s: a TEST text, then a call. A hard landing is explained out loud |
 | E1b | Same drop onto books or a table | No fall. Under Fall detection: *Last drop at … : not a fall. A hard landing that rings once…* |
 | E1c | Same drop onto the cushion with the app open on the screen | No fall. *Last drop at … : not counted. The phone was in your hand with the screen on…* |
 | E2 | Tap **I'm OK** (on the card or in the notification) | Card returns to *Monitoring*; the alert disappears |
@@ -146,5 +147,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 158 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 162 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

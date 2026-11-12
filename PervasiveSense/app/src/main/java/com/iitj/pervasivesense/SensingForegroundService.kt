@@ -173,11 +173,15 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action == ContactAlert.ACTION_CANCEL || intent?.action == ContactAlert.ACTION_OK) {
-            // "Cancel – I'm a passenger" / "I'm OK" in the alert notification.
+        if (intent?.action == ContactAlert.ACTION_CANCEL || intent?.action == ContactAlert.ACTION_OK ||
+            intent?.action == ContactAlert.ACTION_HELP_NOW) {
+            // "Cancel – I'm a passenger" / "I'm OK" / "Get help now" in the alert notification.
             if (!started) { stopSelf(); return START_NOT_STICKY }
-            if (intent.action == ContactAlert.ACTION_OK) handler.post { contactAlert?.ok() }
-            else handler.post { contactAlert?.cancel(asPassenger = true) }
+            when (intent.action) {
+                ContactAlert.ACTION_OK -> handler.post { contactAlert?.ok() }
+                ContactAlert.ACTION_HELP_NOW -> handler.post { contactAlert?.sendNow() }
+                else -> handler.post { contactAlert?.cancel(asPassenger = true) }
+            }
             return START_STICKY
         }
         if (started) return START_STICKY
@@ -360,6 +364,10 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
     override fun onFallConfirmed(snapshot: SensingSnapshot) {
         engine?.let { saveDailyState(it.wellness.exportState()) }
+        // With a contact: "Are you OK?" over the lock screen, out loud; no answer in 60 s texts and calls them.
+        if (alert().start(AlertKind.FALL, test = snapshot.fallTestSecondsLeft > 0)) return
+        // No contact set up: the phone itself still asks, loudly, and shows the alert.
+        speak(getString(R.string.fall_say_no_contact), alarm = true)
         val open = PendingIntent.getActivity(this, 11,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -369,15 +377,38 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Fall detected")
-            .setContentText("High impact followed by immobility. Tap \"I'm OK\" if you are fine.")
+            .setContentTitle(getString(R.string.fall_detected))
+            .setContentText(getString(R.string.fall_notify_no_contact))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.fall_notify_no_contact)))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open)
-            .addAction(0, "I'm OK", ack)
+            .setFullScreenIntent(open, true)
+            .addAction(0, getString(R.string.fall_ack), ack)
             .setAutoCancel(true)
             .build()
         notificationManager.notify(FALL_NOTIFICATION_ID, n)
+    }
+
+    override fun onFallCleared() {
+        // Got up and walking: nobody needs to be alerted.
+        contactAlert?.cancelKind(AlertKind.FALL)
+        notificationManager.cancel(FALL_NOTIFICATION_ID)
+    }
+
+    override fun onFallTest(tip: FallTestTip, check: FallCheck?) {
+        speak(getString(when (tip) {
+            FallTestTip.IMPACT -> R.string.fall_test_say_impact
+            FallTestTip.ENDED -> R.string.fall_test_say_ended
+            FallTestTip.VERDICT -> when (check) {
+                FallCheck.HARD_LANDING -> R.string.fall_test_say_hard
+                FallCheck.SOFT_LANDING -> R.string.fall_test_say_soft
+                FallCheck.MOVED -> R.string.fall_test_say_moved
+                FallCheck.NO_TURN -> R.string.fall_test_say_no_turn
+                else -> R.string.fall_test_say_gap
+            }
+        }), interrupt = tip != FallTestTip.ENDED)
     }
 
     override fun onBreakDue(snapshot: SensingSnapshot) {
@@ -486,13 +517,18 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         speak(getString(text))
     }
 
-    private fun speak(text: String, interrupt: Boolean = true) {
+    /** [alarm]: on the alarm volume (alerts: heard with the phone on silent or Do Not Disturb). */
+    private fun speak(text: String, interrupt: Boolean = true, alarm: Boolean = false) {
         val v = voice ?: FitVoice(this).also { voice = it }
-        v.say(text, interrupt)
+        v.say(text, interrupt, alarm)
     }
 
     private fun alert(): ContactAlert = contactAlert ?: ContactAlert(this, handler, notificationManager, ALERT_CHANNEL_ID,
-        say = { speak(it) }, onPassenger = { engine?.confirmPassenger() }, onOk = { engine?.driverOk() }).also { contactAlert = it }
+        say = { speak(it, alarm = true) }, onPassenger = { engine?.confirmPassenger() },
+        onOk = { k ->
+            if (k == AlertKind.FALL) { engine?.acknowledgeFall(); notificationManager.cancel(FALL_NOTIFICATION_ID) }
+            else engine?.driverOk()
+        }).also { contactAlert = it }
 
     /** With the contact alert on, every trip is watched (a higher bar, the driver asked first), not only after a warning. */
     private fun updateWatchEveryTrip() { engine?.setFitWatchEveryTrip(ContactAlert.ready(this)) }
@@ -604,9 +640,17 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     }
 
     override fun acknowledgeFall() {
-        handler.post { engine?.acknowledgeFall() }
+        handler.post { engine?.acknowledgeFall(); contactAlert?.cancelKind(AlertKind.FALL) }
         notificationManager.cancel(FALL_NOTIFICATION_ID)
     }
+
+    override fun startFallTest() {
+        handler.post { if (engine?.startFallTest() == true) speak(getString(R.string.fall_test_say_start)) }
+    }
+
+    override fun stopFallTest() { handler.post { engine?.stopFallTest() } }
+
+    override fun helpNow() { handler.post { contactAlert?.sendNow() } }
 
     override fun onVehicleConfidence(confidence: Int) {
         handler.post { engine?.onVehicleConfidence(confidence) }

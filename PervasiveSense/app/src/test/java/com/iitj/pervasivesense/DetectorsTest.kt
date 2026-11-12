@@ -278,6 +278,13 @@ class FallDetectorTest {
     }
 
     @Test
+    fun aDropOntoADeepPillowIsTooSoftToFeel() {
+        // 1 m drop (0.45 s of free fall), landing at only 1.8 g, then lying still.
+        assertEquals(FallCheck.SOFT_LANDING, verdictOf(Builder().inHand(3.0).freeFall(0.45)
+            .hold(0.1, 0f, 0f, 1.8f * G, 0f).hold(10.0, 0f, 0f, G, 0.005f)))
+    }
+
+    @Test
     fun everydayMovementNeverShowsADropReason() {
         for (name in listOf("walking_pocket", "jogging_pocket", "upstairs_pocket", "sitting_pocket", "standing_pocket")) {
             val d = FallDetector()

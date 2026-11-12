@@ -29,6 +29,10 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- An alert countdown ("Are you OK?") opens over the lock screen, so the driver can answer without unlocking. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Opens the alert screen directly where a phone blocks the full-screen notification (Xiaomi, Oppo, Vivo...). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- The alert screen buzzes until answered. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Optional: lists the SIMs so the contact alert can try another one (dual SIM). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

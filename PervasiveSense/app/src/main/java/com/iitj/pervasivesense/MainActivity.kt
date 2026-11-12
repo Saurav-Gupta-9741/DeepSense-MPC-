@@ -56,6 +56,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.btnFallAck.setOnClickListener { SensingRepository.acknowledgeFall() }
+        binding.btnFallTest.setOnClickListener {
+            if ((SensingRepository.snapshot.value?.fallTestSecondsLeft ?: 0) > 0) SensingRepository.stopFallTest()
+            else SensingRepository.startFallTest()
+        }
         val openFit = View.OnClickListener { startActivity(Intent(this, FitToDriveActivity::class.java)) }
         binding.cardFit.setOnClickListener(openFit)
         binding.btnFitOpen.setOnClickListener(openFit)
@@ -327,10 +331,15 @@ class MainActivity : AppCompatActivity() {
                 FallCheck.HARD_LANDING -> R.string.fall_check_hard
                 FallCheck.MOVED -> R.string.fall_check_moved
                 FallCheck.NO_TURN -> R.string.fall_check_no_turn
+                FallCheck.SOFT_LANDING -> R.string.fall_check_soft
                 FallCheck.GAP -> R.string.fall_check_gap
             }))
         fallDot.backgroundTintList = tint(dot)
         btnFallAck.visibility = if (s.fallState == FallState.FALL_CONFIRMED) View.VISIBLE else View.GONE
+        val left = s.fallTestSecondsLeft
+        btnFallTest.text = if (left > 0) getString(R.string.fall_test_stop, String.format(Locale.US, "%d:%02d", left / 60, left % 60))
+            else getString(R.string.fall_test)
+        if (left > 0 && c == null) tvFallDetail.setText(R.string.fall_test_hint)
     }
 
     /** What the big button on the Fit to drive card does right now. */

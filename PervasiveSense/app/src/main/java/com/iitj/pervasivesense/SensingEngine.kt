@@ -27,6 +27,8 @@ data class SensingSnapshot(
     val fallState: FallState,
     /** The last drop judged by the fall detector and why (null: none yet). */
     val lastFallCheck: FallCheckReport? = null,
+    /** "Test fall detection" running: seconds left (0: not running). */
+    val fallTestSecondsLeft: Int = 0,
     val wellness: WellnessReport,
     val lastTransition: TransitionEvent?,
     val transitionCount: Int,
@@ -69,12 +71,18 @@ class SensingEngine(
         val vehicleConfidenceMin: Int = 70,
         val vehicleExpirySec: Float = 120f,
         val recoveryLocomotionSec: Float = 5f,
+        /** "Test fall detection" lasts this long. */
+        val fallTestSec: Float = 180f,
         val fitToDrive: FitToDriveMonitor.Config = FitToDriveMonitor.Config()
     )
 
     interface Listener {
         fun onSnapshot(snapshot: SensingSnapshot) {}
         fun onFallConfirmed(snapshot: SensingSnapshot) {}
+        /** A confirmed fall ended without "I'm OK": the person got up and walks (recovered). */
+        fun onFallCleared() {}
+        /** "Test fall detection": what to say (the phone is lying somewhere, not looked at). */
+        fun onFallTest(tip: FallTestTip, check: FallCheck?) {}
         fun onBreakDue(snapshot: SensingSnapshot) {}
         fun onEcoModeChanged(eco: Boolean) {}
         fun onRoadAnomaly(event: RoadAnomalyEvent) {}
@@ -120,6 +128,11 @@ class SensingEngine(
     private var vehicleUpdateT = Long.MIN_VALUE
     private val trip = TripTracker()
     var vehicleDetection = VehicleDetection.STARTING
+
+    /** "Test fall detection": until then a drop from the hand counts (the "in the hand" rule is off). */
+    private var fallTestUntil = Long.MIN_VALUE
+    private var lastFallState = FallState.MONITORING
+    private var lastSeenVerdict: FallVerdict? = null
 
     private var hardwareSteps = false
     private var lastHardwareStepTotal = -1L
@@ -172,6 +185,26 @@ class SensingEngine(
         fall.acknowledge()
         if (lastSampleT != Long.MIN_VALUE) publish(lastSampleT)
     }
+
+    /**
+     * "Test fall detection" for [Config.fallTestSec]: a phone dropped from the hand (screen on) is
+     * judged like a fall, and every drop is explained out loud. False before the first sample.
+     */
+    fun startFallTest(): Boolean {
+        if (lastSampleT == Long.MIN_VALUE) return false
+        fallTestUntil = lastSampleT + (config.fallTestSec * 1e9f).toLong()
+        lastSeenVerdict = fall.lastVerdict
+        fall.forgetHeld()
+        publish(lastSampleT)
+        return true
+    }
+
+    fun stopFallTest() {
+        fallTestUntil = Long.MIN_VALUE
+        if (lastSampleT != Long.MIN_VALUE) publish(lastSampleT)
+    }
+
+    private fun fallTestActive(t: Long) = fallTestUntil != Long.MIN_VALUE && t < fallTestUntil
 
     // ---------------------------------------------------------------- fit-to-drive commands
     fun setFitToDriveEnabled(on: Boolean) {
@@ -280,7 +313,23 @@ class SensingEngine(
 
         // Held and looked at (screen on, uncovered, or this app on screen): an impact is the phone being put down.
         val held = screenOn && (uiVisible || (proximityAvailable && proximitySeenNear && !proximityNear))
-        val fallConfirmed = fall.processSample(t, ax, ay, az, held)
+        val testingFall = fallTestActive(t)
+        if (fallTestUntil != Long.MIN_VALUE && !testingFall) {
+            fallTestUntil = Long.MIN_VALUE
+            listener.onFallTest(FallTestTip.ENDED, null)
+        }
+        val fallConfirmed = fall.processSample(t, ax, ay, az, held && !testingFall)
+        if (testingFall) {
+            if (lastFallState == FallState.MONITORING && fall.currentState == FallState.IMPACT_SUSPECTED) {
+                listener.onFallTest(FallTestTip.IMPACT, null)
+            }
+            val v = fall.lastVerdict
+            if (v != null && v !== lastSeenVerdict) {
+                lastSeenVerdict = v
+                if (v.check != FallCheck.FALL) listener.onFallTest(FallTestTip.VERDICT, v.check)
+            }
+        }
+        lastFallState = fall.currentState
         if (fallConfirmed) wellness.onFallEvent()
 
         // Fit-to-drive: score the walk that led up to a trip as soon as the trip is detected.
@@ -359,6 +408,7 @@ class SensingEngine(
         if (fall.currentState == FallState.FALL_CONFIRMED && locomotionSinceT != Long.MIN_VALUE &&
             (t - locomotionSinceT) >= (config.recoveryLocomotionSec * 1e9f).toLong()) {
             fall.acknowledge()
+            listener.onFallCleared()
         }
 
         // Eco mode: long stationary periods with nobody watching the dashboard.
@@ -405,6 +455,7 @@ class SensingEngine(
             vehicleDetection = vehicleDetection,
             fallState = fall.currentState,
             lastFallCheck = fall.lastVerdict?.let { FallCheckReport(wallClockOf(it.tNanos), it.peakG, it.check) },
+            fallTestSecondsLeft = if (fallTestActive(t)) kotlin.math.ceil((fallTestUntil - t) / 1e9).toInt() else 0,
             wellness = wellness.computeWellnessReport(),
             lastTransition = transitions.lastTransition,
             transitionCount = transitions.totalTransitions,

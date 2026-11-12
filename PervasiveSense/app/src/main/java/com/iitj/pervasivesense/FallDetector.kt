@@ -20,11 +20,23 @@ enum class FallCheck {
     MOVED,
     /** It landed the same way up as before: no standing-to-lying. */
     NO_TURN,
+    /** It fell (a real drop) but landed too softly to tell (impact below the threshold): a deep pillow. */
+    SOFT_LANDING,
     /** Sensor data was missing: not judged. */
     GAP
 }
 
 class FallVerdict(val tNanos: Long, val peakG: Float, val check: FallCheck)
+
+/** Spoken coaching during "Test fall detection". */
+enum class FallTestTip {
+    /** An impact after a drop: keep still. */
+    IMPACT,
+    /** A drop was judged and was not a fall: say why ([FallCheck]). */
+    VERDICT,
+    /** The test time ran out. */
+    ENDED
+}
 
 /**
  * Multi-phase fall detector (threshold + posture-change + inactivity model).
@@ -87,6 +99,11 @@ class FallDetector(
 
     /** The impact being observed followed a real drop (not a step): its verdict is shown. */
     private var reportable = false
+    /** Samples in a row below [lowG] so far (monitoring). */
+    private var lowRun = 0
+    /** A real drop just ended without an impact yet: if none comes by then, it landed too softly. */
+    private var softUntil = Long.MIN_VALUE
+    private var softPeak = 0f
 
     private fun verdict(t: Long, peak: Float, check: FallCheck) {
         if (check == FallCheck.FALL || reportable) lastVerdict = FallVerdict(t, peak, check)
@@ -123,6 +140,19 @@ class FallDetector(
 
         when (currentState) {
             FallState.MONITORING -> {
+                // A drop that never hits hard: say "too soft" (a test onto a deep pillow).
+                if (magG < lowG) lowRun++ else {
+                    if (lowRun >= reportDropSamples) { softUntil = tNanos + 500_000_000L; softPeak = 0f }
+                    lowRun = 0
+                }
+                if (softUntil != Long.MIN_VALUE) {
+                    softPeak = maxOf(softPeak, magG)
+                    if (magG > impactG) softUntil = Long.MIN_VALUE // it did hit: judged below
+                    else if (tNanos > softUntil) {
+                        softUntil = Long.MIN_VALUE
+                        lastVerdict = FallVerdict(tNanos, softPeak, FallCheck.SOFT_LANDING)
+                    }
+                }
                 if (magG > impactG && heldRecently && hadPreImpactLowG(tNanos)) {
                     // Dropped from the hand while looked at: say so once per drop.
                     reportable = deepLowGSamples(tNanos) >= reportDropSamples
@@ -184,9 +214,13 @@ class FallDetector(
         if (currentState == FallState.FALL_CONFIRMED) currentState = FallState.MONITORING
     }
 
+    /** "Test fall detection" started: the phone having been in the hand a moment ago no longer counts. */
+    fun forgetHeld() { lastHeldT = Long.MIN_VALUE }
+
     fun reset() {
         currentState = FallState.MONITORING
         hHead = 0; hCount = 0; lastT = Long.MIN_VALUE
+        lowRun = 0; softUntil = Long.MIN_VALUE
     }
 
     private fun remember(t: Long, ax: Float, ay: Float, az: Float) {

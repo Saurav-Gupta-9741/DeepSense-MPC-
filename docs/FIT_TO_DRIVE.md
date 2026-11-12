@@ -496,3 +496,29 @@ not judged, sensor data missing. Steps, jogging and stairs never show a reason (
 stays light for about 0.2 s; real recordings tested).
 
 Tests (2 new, 158 JVM tests): every kind of drop gets its reason; everyday movement never does.
+
+## v3.11: a fall alerts the contact; the alert opens on every phone; status lines finish
+
+- **A fall now reaches the trusted contact.** Before, a confirmed fall only posted a notification.
+  Now it asks "Did you fall? Are you OK?" over the lock screen, out loud on the alarm volume, with
+  a buzz that repeats until answered: **I'm OK** (acknowledged), **Get help now** (the text and the
+  call at once), or no answer in 60 s: the text with the location, then the call. A person who gets
+  up and walks calls it off. Falls are never limited to one alert an hour. Without a contact the
+  phone still asks out loud and shows the alert.
+- **Test fall detection** (Fall detection card, 3 minutes): a drop from the hand with the screen on
+  counts, and each drop is explained out loud ("Impact felt", "That landing was hard, like a table",
+  "too soft", "it moved", "it landed the same way up"); a detected fall sends a TEST alert.
+- **Too soft:** a real drop that never lands hard (a deep pillow) now says so.
+- **The alert opens on every phone:** Xiaomi, Oppo, Realme, Vivo and others block full-screen
+  notifications from the background. With "Display over other apps" allowed, the alert screen is
+  opened directly. The settings status now checks four things (runs when closed, notifications and
+  the alert channel, lock screen, pop-up over other apps) with one **Fix** button, plus the brand's
+  own switches (Samsung, Xiaomi, Oppo/Realme/OnePlus, Vivo).
+- **Heard on silent:** alert speech plays on the alarm volume (silent, vibrate, Do Not Disturb with
+  alarms allowed).
+- **"Calling ..." no longer stays:** after the call ends (or a minute, without the phone-state
+  permission) it becomes "Alert sent to ... at HH:MM: text and call.", and status lines clear after
+  10 minutes. A failed text stays until it is sent another way.
+- Tests (4 new, 162 JVM tests): a drop from the hand is ignored normally and counts in a fall test
+  (end to end from raw sensor events), a hard landing in a test is explained, a fall clears itself
+  when the person walks, a deep-pillow drop is "too soft".

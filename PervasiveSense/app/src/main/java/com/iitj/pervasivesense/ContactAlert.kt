@@ -37,6 +37,8 @@ enum class AlertKind {
     ERRATIC_DRIVING,
     /** Unsteady driving with no warning: the driver is asked "Are you OK?" first; no answer reaches the contact. */
     UNSTEADY_DRIVING,
+    /** A fall: "Are you OK?" first ("I'm OK" or "Get help now"); no answer reaches the contact. */
+    FALL,
     TEST
 }
 
@@ -65,8 +67,8 @@ class ContactAlert(
     private val say: (String) -> Unit,
     /** Cancelled with "I'm a passenger": stop watching this trip. */
     private val onPassenger: () -> Unit,
-    /** "I'm OK" when asked about unsteady driving: not asked again for a while on this trip. */
-    private val onOk: () -> Unit = {}
+    /** "I'm OK" when asked (unsteady driving: not asked again for a while on this trip; a fall: acknowledged). */
+    private val onOk: (AlertKind) -> Unit = {}
 ) {
     companion object {
         private const val TAG = "ContactAlert"
@@ -79,10 +81,20 @@ class ContactAlert(
         const val NOTIFICATION_ID = 1005
         const val ACTION_CANCEL = "com.iitj.pervasivesense.action.CANCEL_ALERT"
         const val ACTION_OK = "com.iitj.pervasivesense.action.DRIVER_OK"
+        /** "Get help now" (a fall): the text and the call go out at once. */
+        const val ACTION_HELP_NOW = "com.iitj.pervasivesense.action.HELP_NOW"
+        /** The status line ("Alert sent to ...", "Calling ...") clears itself after this long. */
+        private const val STATUS_MS = 10 * 60_000L
+
+        /** The question kinds: the person answers "I'm OK" (or nobody answers). */
+        fun asks(k: AlertKind) = k == AlertKind.UNSTEADY_DRIVING || k == AlertKind.FALL
+
+        /** "Display over other apps": the alert screen can then be opened directly, on every brand of phone. */
+        fun canOpenOverOtherApps(c: Context) = android.provider.Settings.canDrawOverlays(c)
 
         fun countdownSec(k: AlertKind) = when (k) {
             AlertKind.TEST -> TEST_COUNTDOWN_SEC
-            AlertKind.UNSTEADY_DRIVING -> ASK_SEC
+            AlertKind.UNSTEADY_DRIVING, AlertKind.FALL -> ASK_SEC
             AlertKind.DRIVING_AFTER_WARNING, AlertKind.ERRATIC_DRIVING -> COUNTDOWN_SEC
         }
 
@@ -91,6 +103,7 @@ class ContactAlert(
             AlertKind.DRIVING_AFTER_WARNING -> c.getString(R.string.fit_alert_detail_driving)
             AlertKind.ERRATIC_DRIVING -> c.getString(R.string.fit_alert_detail_erratic)
             AlertKind.UNSTEADY_DRIVING -> c.getString(R.string.fit_alert_detail_unsteady, contactName)
+            AlertKind.FALL -> c.getString(R.string.fall_alert_detail, contactName)
             AlertKind.TEST -> c.getString(R.string.fit_alert_detail_test)
         }
 
@@ -183,7 +196,8 @@ class ContactAlert(
             return false
         }
         val last = lastSent[k]
-        if (k != AlertKind.TEST && !test && last != null && now - last < REPEAT_MS) return false
+        // At most one alert of a kind per hour (no repeated texts on one bad trip); never for a fall.
+        if (k != AlertKind.TEST && k != AlertKind.FALL && !test && last != null && now - last < REPEAT_MS) return false
         if (!ready(context)) return false
         SensingRepository.setFailedSms(null)
         kind = k
@@ -196,11 +210,44 @@ class ContactAlert(
             AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_say_alert_driving
             AlertKind.ERRATIC_DRIVING -> R.string.fit_say_alert_erratic
             AlertKind.UNSTEADY_DRIVING -> R.string.fit_say_alert_unsteady
+            AlertKind.FALL -> R.string.fall_say_alert
             AlertKind.TEST -> R.string.fit_say_alert_test
         }))
         update() // the countdown is published before the alert screen opens and reads it
         postCountdownNotification(k)
+        openAlertScreenNow()
         return true
+    }
+
+    /**
+     * With "Display over other apps" allowed, the alert screen opens directly as well: some phones
+     * (Xiaomi, Oppo, Realme, Vivo...) block the full-screen notification from the background.
+     */
+    private fun openAlertScreenNow() {
+        if (!canOpenOverOtherApps(context)) return
+        try {
+            context.startActivity(Intent(context, AlertActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        } catch (e: Exception) {
+            Log.w(TAG, "alert screen not opened", e)
+        }
+    }
+
+    /** "Get help now" (a fall): no need to wait for the countdown. */
+    fun sendNow() {
+        val k = kind ?: return
+        if (k == AlertKind.TEST) return
+        handler.removeCallbacks(tick)
+        deadline = SystemClock.elapsedRealtime()
+        update()
+    }
+
+    /** A countdown of [k] is no longer needed (the fall was acknowledged on the dashboard, or the person got up). */
+    fun cancelKind(k: AlertKind) {
+        if (kind != k) return
+        stop()
+        notificationManager.cancel(NOTIFICATION_ID)
+        say(context.getString(R.string.fit_say_alert_cancelled))
     }
 
     /** [asPassenger]: the user is not driving; the trip is no longer watched. */
@@ -217,18 +264,57 @@ class ContactAlert(
      * only "I'm a passenger" stops the alert: someone impaired would also say they are OK).
      */
     fun ok() {
-        if (kind != AlertKind.UNSTEADY_DRIVING) return
+        val k = kind ?: return
+        if (!asks(k)) return
         stop()
         notificationManager.cancel(NOTIFICATION_ID)
-        onOk()
-        say(context.getString(R.string.fit_say_alert_ok))
+        onOk(k)
+        say(context.getString(if (k == AlertKind.FALL) R.string.fall_say_ok else R.string.fit_say_alert_ok))
     }
 
     fun shutdown() {
         stop()
         handler.removeCallbacks(sayCalling)
         handler.removeCallbacks(call)
+        handler.removeCallbacks(watchCall)
+        handler.removeCallbacks(clearStatus)
         notificationManager.cancel(NOTIFICATION_ID)
+    }
+
+    // ------------------------------------------------------------------ the status line
+    private var statusText: String? = null
+    private val clearStatus = Runnable { if (SensingRepository.message.value == statusText) SensingRepository.setMessage(null) }
+
+    /** A status line on the screens that clears itself after [STATUS_MS] (unless something else replaced it). */
+    private fun status(text: String) {
+        statusText = text
+        SensingRepository.setMessage(text)
+        handler.removeCallbacks(clearStatus)
+        handler.postDelayed(clearStatus, STATUS_MS)
+    }
+
+    /** When the alert text went out ("HH:mm"), for the final status line. */
+    private var sentAt = ""
+    private var callStart = 0L
+    private var sawInCall = false
+    private val watchCall = Runnable { checkCall() }
+
+    /**
+     * "Calling ..." until the call ends, then "Alert sent to ... : text and call." Android says whether
+     * a call is going on only with the phone-state permission; without it the call is taken as over
+     * after a minute.
+     */
+    @SuppressLint("MissingPermission") // a refusal is caught
+    private fun checkCall() {
+        val elapsed = SystemClock.elapsedRealtime() - callStart
+        val inCall = runCatching { context.getSystemService(TelecomManager::class.java)?.isInCall }.getOrNull()
+        val goingOn = when (inCall) {
+            true -> { sawInCall = true; elapsed < 30 * 60_000L }
+            false -> !sawInCall && elapsed < 15_000L // the phone app may not have started the call yet
+            null -> elapsed < 60_000L
+        }
+        if (goingOn) { handler.postDelayed(watchCall, 3_000L); return }
+        status(context.getString(R.string.fit_alert_called, contactName(), sentAt))
     }
 
     private fun stop() {
@@ -243,7 +329,7 @@ class ContactAlert(
         val left = ceil((deadline - SystemClock.elapsedRealtime()) / 1000.0).toInt()
         if (left <= 0) { send(k); return }
         // The driver may not have heard the first question (music, a call): ask again.
-        if (k == AlertKind.UNSTEADY_DRIVING && left in ASK_AGAIN_AT && askedAgain.add(left)) {
+        if (asks(k) && left in ASK_AGAIN_AT && askedAgain.add(left)) {
             say(context.getString(R.string.fit_say_alert_unsteady_again, left))
         }
         SensingRepository.setAlert(AlertCountdown(k, left, contactName(), testRun))
@@ -260,6 +346,7 @@ class ContactAlert(
             AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_sms_driving
             AlertKind.ERRATIC_DRIVING -> R.string.fit_sms_erratic
             AlertKind.UNSTEADY_DRIVING -> R.string.fit_sms_unsteady
+            AlertKind.FALL -> R.string.fall_sms
             AlertKind.TEST -> R.string.fit_sms_test
         })
         if (loc != null) {
@@ -302,7 +389,11 @@ class ContactAlert(
             false
         }
         if (ok) {
-            SensingRepository.setMessage(context.getString(R.string.fit_calling, contactName()))
+            status(context.getString(R.string.fit_calling, contactName()))
+            callStart = SystemClock.elapsedRealtime()
+            sawInCall = false
+            handler.removeCallbacks(watchCall)
+            handler.postDelayed(watchCall, 3_000L)
             return
         }
         val dial = PendingIntent.getActivity(context, 35,
@@ -359,7 +450,7 @@ class ContactAlert(
                     whatsAppIntent(context, phone, text), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             notificationManager.notify(NOTIFICATION_ID, n.build())
             SensingRepository.setFailedSms(if (ok) null else phone to text)
-            SensingRepository.setMessage(result)
+            if (ok) { sentAt = at; status(result) } else SensingRepository.setMessage(result) // a failure stays until handled
             say(context.getString(if (ok) R.string.fit_say_alert_sent else R.string.fit_say_alert_failed))
         }
     }
@@ -507,8 +598,11 @@ class ContactAlert(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val secs = ((deadline - SystemClock.elapsedRealtime()) / 1000).toInt()
         val title = (if (testRun) context.getString(R.string.fit_test_drive_tag) else "") +
-            context.getString(if (k == AlertKind.UNSTEADY_DRIVING) R.string.fit_alert_ask_notify_title
-                else R.string.fit_alert_notify_title, contactName())
+            context.getString(when (k) {
+                AlertKind.FALL -> R.string.fall_alert_notify_title
+                AlertKind.UNSTEADY_DRIVING -> R.string.fit_alert_ask_notify_title
+                else -> R.string.fit_alert_notify_title
+            }, contactName())
         val text = detailText(context, k, contactName())
         val b = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -526,13 +620,20 @@ class ContactAlert(
             // Screen off or locked: the alert screen opens over the lock screen (Android 14+: only with
             // the full-screen permission; without it this is a heads-up notification).
             .setFullScreenIntent(openAlertScreen(36), true)
-        if (k == AlertKind.UNSTEADY_DRIVING) {
+        if (asks(k)) {
             val ok = PendingIntent.getService(context, 37,
                 Intent(context, SensingForegroundService::class.java).setAction(ACTION_OK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             b.addAction(0, context.getString(R.string.fit_alert_ok), ok)
         }
-        b.addAction(0, context.getString(if (k == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel), cancel)
+        if (k == AlertKind.FALL) {
+            val help = PendingIntent.getService(context, 38,
+                Intent(context, SensingForegroundService::class.java).setAction(ACTION_HELP_NOW),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            b.addAction(0, context.getString(R.string.fall_help_now), help)
+        } else {
+            b.addAction(0, context.getString(if (k == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel), cancel)
+        }
         notificationManager.notify(NOTIFICATION_ID, b.build())
     }
 

@@ -2,6 +2,7 @@ package com.iitj.pervasivesense
 
 import android.content.Context
 import android.media.AudioManager
+import android.os.Bundle
 import android.media.ToneGenerator
 import android.speech.tts.TextToSpeech
 import java.util.Locale
@@ -17,6 +18,7 @@ class FitVoice(context: Context) {
     @Volatile private var ready = false
     /** Said as soon as the voice engine is ready (the first sentence comes before it is). */
     @Volatile private var pending: String? = null
+    @Volatile private var pendingAlarm = false
     private var tts: TextToSpeech? = null
 
     init {
@@ -24,7 +26,7 @@ class FitVoice(context: Context) {
             ready = status == TextToSpeech.SUCCESS && chooseLanguage()
             val p = pending
             pending = null
-            if (ready && p != null) tts?.speak(p, TextToSpeech.QUEUE_FLUSH, null, "fit")
+            if (ready && p != null) tts?.speak(p, TextToSpeech.QUEUE_FLUSH, params(pendingAlarm), "fit")
         }
     }
 
@@ -37,12 +39,18 @@ class FitVoice(context: Context) {
         return false
     }
 
-    /** [interrupt] cuts off what is being said; otherwise the sentence is queued. */
-    fun say(text: String, interrupt: Boolean = true) {
-        if (ready) tts?.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "fit")
-        else pending = text
+    /**
+     * [interrupt] cuts off what is being said; otherwise the sentence is queued. [alarm]: on the alarm
+     * volume, so an alert is heard with the phone on silent, vibrate or Do Not Disturb (alarms allowed).
+     */
+    fun say(text: String, interrupt: Boolean = true, alarm: Boolean = false) {
+        if (ready) tts?.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, params(alarm), "fit")
+        else { pending = text; pendingAlarm = alarm }
         beep()
     }
+
+    private fun params(alarm: Boolean): Bundle? =
+        if (alarm) Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) } else null
 
     fun beep() { tone?.startTone(ToneGenerator.TONE_PROP_BEEP2, 250) }
 
