@@ -9,6 +9,23 @@ enum class FallState {
     FALL_CONFIRMED
 }
 
+/** What the detector decided about the last drop (a free fall then an impact), so the screen can say why. */
+enum class FallCheck {
+    FALL,
+    /** The phone was in the hand and looked at: that is putting it down. */
+    HELD,
+    /** One sharp tick (a phone landing on a table or books); a body lands softer. */
+    HARD_LANDING,
+    /** It moved again during the observation (got up, picked up). */
+    MOVED,
+    /** It landed the same way up as before: no standing-to-lying. */
+    NO_TURN,
+    /** Sensor data was missing: not judged. */
+    GAP
+}
+
+class FallVerdict(val tNanos: Long, val peakG: Float, val check: FallCheck)
+
 /**
  * Multi-phase fall detector (threshold + posture-change + inactivity model).
  *
@@ -48,7 +65,9 @@ class FallDetector(
     private val observeSec: Float = 6.0f,
     private val immobileStdG: Float = 0.10f,
     private val minOrientationChangeDeg: Float = 30f,
-    private val maxGapSec: Float = 1.0f
+    private val maxGapSec: Float = 1.0f,
+    /** A drop worth explaining on screen: this many samples in a row below [lowG] (0.3 s, a drop of about 45 cm or more). A step in a pocket stays light for about 10 (real walking). */
+    private val reportDropSamples: Int = 15
 ) {
     companion object {
         const val G = 9.80665f
@@ -59,6 +78,19 @@ class FallDetector(
         private set
     var lastImpactPeakG = 0f
         private set
+    /**
+     * The last drop that was judged: a free fall then an impact above [impactG]. Everyday impacts
+     * without a free fall (steps, sitting down) are never reported here.
+     */
+    var lastVerdict: FallVerdict? = null
+        private set
+
+    /** The impact being observed followed a real drop (not a step): its verdict is shown. */
+    private var reportable = false
+
+    private fun verdict(t: Long, peak: Float, check: FallCheck) {
+        if (check == FallCheck.FALL || reportable) lastVerdict = FallVerdict(t, peak, check)
+    }
 
     // Recent history for the pre-impact analysis.
     private val hT = LongArray(HISTORY)
@@ -91,7 +123,13 @@ class FallDetector(
 
         when (currentState) {
             FallState.MONITORING -> {
-                if (magG > impactG && !heldRecently && hadPreImpactLowG(tNanos) && estimatePreImpactDirection(tNanos)) {
+                if (magG > impactG && heldRecently && hadPreImpactLowG(tNanos)) {
+                    // Dropped from the hand while looked at: say so once per drop.
+                    reportable = deepLowGSamples(tNanos) >= reportDropSamples
+                    val v = lastVerdict
+                    if (v == null || v.check != FallCheck.HELD || tNanos - v.tNanos > 1_000_000_000L) verdict(tNanos, magG, FallCheck.HELD)
+                } else if (magG > impactG && hadPreImpactLowG(tNanos) && estimatePreImpactDirection(tNanos)) {
+                    reportable = deepLowGSamples(tNanos) >= reportDropSamples
                     currentState = FallState.IMPACT_SUSPECTED
                     impactT = tNanos
                     impactSamples = 1
@@ -103,11 +141,13 @@ class FallDetector(
                 val sinceImpact = (tNanos - impactT) / 1e9f
                 if (gap) {
                     currentState = FallState.MONITORING // cannot judge across missing data
+                    verdict(impactT, lastImpactPeakG, FallCheck.GAP)
                 } else if (sinceImpact < impactWindowSec) {
                     if (magG > impactBodyG) impactSamples++
                     if (magG > lastImpactPeakG) lastImpactPeakG = magG
                 } else if (impactSamples < minImpactSamples) {
                     currentState = FallState.MONITORING // a sharp tick: the phone hit something, the body did not
+                    verdict(impactT, lastImpactPeakG, FallCheck.HARD_LANDING)
                 } else if (sinceImpact < settleSec) {
                     if (magG > lastImpactPeakG) lastImpactPeakG = magG
                 } else if (sinceImpact < settleSec + observeSec) {
@@ -122,8 +162,14 @@ class FallDetector(
                     if (obsN >= 10 && std < immobileStdG && change >= minOrientationChangeDeg) {
                         currentState = FallState.FALL_CONFIRMED
                         confirmed = true
+                        verdict(impactT, lastImpactPeakG, FallCheck.FALL)
                     } else {
                         currentState = FallState.MONITORING
+                        verdict(impactT, lastImpactPeakG, when {
+                            obsN < 10 -> FallCheck.GAP
+                            std >= immobileStdG -> FallCheck.MOVED
+                            else -> FallCheck.NO_TURN
+                        })
                     }
                 }
             }
@@ -169,6 +215,20 @@ class FallDetector(
             }
         }
         return deep && low >= minLowGSamples
+    }
+
+    /** The longest unbroken run below [lowG] in the second before the impact: how long the phone fell. */
+    private fun deepLowGSamples(now: Long): Int {
+        val from = now - (freeFallLookbackSec * 1e9f).toLong()
+        var run = 0; var best = 0
+        forHistory { t, i ->
+            if (t >= from) {
+                val m = sqrt(hA[i * 3] * hA[i * 3] + hA[i * 3 + 1] * hA[i * 3 + 1] + hA[i * 3 + 2] * hA[i * 3 + 2]) / G
+                run = if (m < lowG) run + 1 else 0
+                if (run > best) best = run
+            }
+        }
+        return best
     }
 
     /** Mean acceleration (≈ gravity direction) over the second before the fall began. */

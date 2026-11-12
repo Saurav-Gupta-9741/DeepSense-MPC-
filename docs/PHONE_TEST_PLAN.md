@@ -60,12 +60,14 @@ Simulate with the phone only, onto something soft but firm (sofa cushion or matt
 
 | # | Do this | Pass if |
 |---|---|---|
-| E1 | Hold the phone upright at ~1 m, drop it onto the cushion, **don't touch it for 10 s** | Card shows *Checking impact…*, then **Fall detected** after ~7.5 s; a fall-alert notification appears |
+| E1 | **Lock the screen**, hold the phone upright at ~1 m, drop it onto the cushion or a mattress (not a table, books or the floor), **don't touch it for 10 s** | Card shows *Checking impact…*, then **Fall detected** after ~7.5 s; a fall-alert notification appears |
+| E1b | Same drop onto books or a table | No fall. Under Fall detection: *Last drop at … : not a fall. A hard landing that rings once…* |
+| E1c | Same drop onto the cushion with the app open on the screen | No fall. *Last drop at … : not counted. The phone was in your hand with the screen on…* |
 | E2 | Tap **I'm OK** (on the card or in the notification) | Card returns to *Monitoring*; the alert disappears |
 | E3 | Jump in place, then stand still | No fall alert (body orientation did not change). *Checking impact…* may flash briefly, then returns to *Monitoring* |
 | E4 | Walk, sit down firmly on a chair | No fall alert |
 
-If E1 does not trigger, the landing was too soft (impact below 2.5 g). Try a
+If E1 does not trigger, the Fall detection card says why (*Last drop at …*). If it says nothing, the landing was too soft (impact below 2.5 g). Try a
 firmer cushion. Safety score in Daily wellness drops by 25 per confirmed fall.
 
 ## F. Vehicle & road hazards (**as a passenger only**)
@@ -144,5 +146,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 156 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 158 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

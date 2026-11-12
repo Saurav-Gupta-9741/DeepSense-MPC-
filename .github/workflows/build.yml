@@ -52,7 +52,7 @@ jobs:
           bsdtar -xf "$RUNNER_TEMP/shoaib.rar" -C "$RUNNER_TEMP/shoaib"
           echo "SHOAIB_DIR=$RUNNER_TEMP/shoaib/DataSet" >> "$GITHUB_ENV"
 
-      - name: Engine unit tests (156 JVM tests on real recordings, none skipped)
+      - name: Engine unit tests (158 JVM tests on real recordings, none skipped)
         run: |
           ./gradlew :app:testDebugUnitTest --stacktrace
           ! grep -l "<skipped" app/build/test-results/testDebugUnitTest/*.xml

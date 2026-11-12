@@ -63,6 +63,13 @@
     <string name="fall_detected">Fall detected</string>
     <string name="fall_detected_detail">Tap “I’m OK” if you are fine.</string>
     <string name="fall_ack">I’m OK</string>
+    <string name="fall_last_check">Last drop at %1$s (%2$.1f g): %3$s</string>
+    <string name="fall_check_fall">a fall.</string>
+    <string name="fall_check_held">not counted. The phone was in your hand with the screen on, which is putting it down. To test, lock the screen first.</string>
+    <string name="fall_check_hard">not a fall. A hard landing that rings once, like a phone on a table or books; a body lands softer. To test, drop it on a cushion or mattress.</string>
+    <string name="fall_check_moved">not a fall. It moved again within 8 s of landing. To test, don’t touch it for 10 s.</string>
+    <string name="fall_check_no_turn">not a fall. It landed the same way up as it was held; a fall turns the body from standing to lying. To test, hold it upright and let it land flat.</string>
+    <string name="fall_check_gap">not judged: sensor data was missing.</string>
     <string name="card_road">Road hazards</string>
     <string name="road_active">In a vehicle, watching the road</string>
     <string name="road_paused">Paused until you are in a vehicle</string>

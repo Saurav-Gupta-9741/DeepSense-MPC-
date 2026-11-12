@@ -318,7 +318,17 @@ class MainActivity : AppCompatActivity() {
         }
         tvFallStatus.setText(status)
         tvFallStatus.setTextColor(color(dot))
-        tvFallDetail.setText(detail)
+        // While monitoring: why the last drop (within 10 min) was or was not a fall.
+        val c = s.lastFallCheck?.takeIf { s.fallState == FallState.MONITORING && System.currentTimeMillis() - it.wallMillis < 600_000L }
+        tvFallDetail.text = if (c == null) getString(detail) else getString(R.string.fall_last_check,
+            fitTime.format(Date(c.wallMillis)), c.peakG, getString(when (c.check) {
+                FallCheck.FALL -> R.string.fall_check_fall
+                FallCheck.HELD -> R.string.fall_check_held
+                FallCheck.HARD_LANDING -> R.string.fall_check_hard
+                FallCheck.MOVED -> R.string.fall_check_moved
+                FallCheck.NO_TURN -> R.string.fall_check_no_turn
+                FallCheck.GAP -> R.string.fall_check_gap
+            }))
         fallDot.backgroundTintList = tint(dot)
         btnFallAck.visibility = if (s.fallState == FallState.FALL_CONFIRMED) View.VISIBLE else View.GONE
     }

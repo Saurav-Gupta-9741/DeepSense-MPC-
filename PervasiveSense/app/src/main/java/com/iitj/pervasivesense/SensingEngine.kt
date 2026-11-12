@@ -2,6 +2,9 @@ package com.iitj.pervasivesense
 
 enum class EngineStatus { WARMING_UP, ACTIVE, MODEL_ERROR }
 
+/** A drop the fall detector judged: when (wall clock), how hard, and the verdict. */
+data class FallCheckReport(val wallMillis: Long, val peakG: Float, val check: FallCheck)
+
 /** Availability of vehicle (IN_VEHICLE) detection, reported by the host. */
 enum class VehicleDetection { STARTING, ACTIVE, NO_PERMISSION, UNAVAILABLE }
 
@@ -22,6 +25,8 @@ data class SensingSnapshot(
     val roadMonitoringActive: Boolean,
     val vehicleDetection: VehicleDetection,
     val fallState: FallState,
+    /** The last drop judged by the fall detector and why (null: none yet). */
+    val lastFallCheck: FallCheckReport? = null,
     val wellness: WellnessReport,
     val lastTransition: TransitionEvent?,
     val transitionCount: Int,
@@ -399,6 +404,7 @@ class SensingEngine(
             roadMonitoringActive = isInVehicle(t),
             vehicleDetection = vehicleDetection,
             fallState = fall.currentState,
+            lastFallCheck = fall.lastVerdict?.let { FallCheckReport(wallClockOf(it.tNanos), it.peakG, it.check) },
             wellness = wellness.computeWellnessReport(),
             lastTransition = transitions.lastTransition,
             transitionCount = transitions.totalTransitions,

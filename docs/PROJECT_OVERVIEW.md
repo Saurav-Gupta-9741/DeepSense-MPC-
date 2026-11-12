@@ -108,7 +108,7 @@ Details: [`FIT_TO_DRIVE.md`](FIT_TO_DRIVE.md).
 
 ### 10. Verified, reproducible engineering
 - The model is validated in the exact TFLite runtime version the app ships. The v1 model failed this check on the phone itself.
-- 156 JVM tests exercise the real Kotlin engine by replaying real sensor recordings, delivered with realistic timing jitter.
+- 158 JVM tests exercise the real Kotlin engine by replaying real sensor recordings, delivered with realistic timing jitter.
 - 24 model tests run on held-out real data.
 - Every push to GitHub runs all tests and builds the APK automatically.
 

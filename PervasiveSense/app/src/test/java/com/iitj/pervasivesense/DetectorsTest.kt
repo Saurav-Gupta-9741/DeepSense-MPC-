@@ -250,6 +250,43 @@ class FallDetectorTest {
         assertFalse(b.run(FallDetector()).first)
     }
 
+    // ---- Why a drop was not a fall (shown on the dashboard: a phone test said nothing at all)
+
+    private fun verdictOf(b: Builder, held: (Int) -> Boolean = { false }): FallCheck? {
+        val d = FallDetector(); b.run(d, held); return d.lastVerdict?.check
+    }
+
+    @Test
+    fun everyDropGetsAReason() {
+        // A body's fall: FALL.
+        assertEquals(FallCheck.FALL, verdictOf(Builder().append(standing()).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)))
+        // A phone dropped 1 m onto a pile of books (one sharp tick): HARD_LANDING. (Let go 10 cm above a
+        // table is too small a drop to explain on screen.)
+        assertNull(verdictOf(droppedOnTable()))
+        assertEquals(FallCheck.HARD_LANDING, verdictOf(Builder().inHand(3.0).freeFall(0.45)
+            .hold(0.02, 0f, 0f, 6f * G, 0f).hold(0.02, 0f, 0f, 0.6f * G, 0f).hold(12.0, 0f, 0f, G, 0.005f)))
+        // Dropped from the hand while looked at (the app on screen): HELD.
+        val inHandDrop = Builder().inHand(3.0).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
+        assertEquals(FallCheck.HELD, verdictOf(inHandDrop) { it < 3 * 50 + 10 })
+        // Picked up again straight away: MOVED.
+        assertEquals(FallCheck.MOVED, verdictOf(Builder().append(standing()).freeFall(0.35).impact(4f).bounces(0.8)
+            .append(Recording.fixture("walking_pocket"))))
+        // Landed the same way up: NO_TURN.
+        val st = standing()
+        val up = floatArrayOf(st.data.map { it[0] }.average().toFloat(), st.data.map { it[1] }.average().toFloat(), st.data.map { it[2] }.average().toFloat())
+        assertEquals(FallCheck.NO_TURN, verdictOf(Builder().append(st).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, up[0], up[1], up[2])))
+    }
+
+    @Test
+    fun everydayMovementNeverShowsADropReason() {
+        for (name in listOf("walking_pocket", "jogging_pocket", "upstairs_pocket", "sitting_pocket", "standing_pocket")) {
+            val d = FallDetector()
+            val rec = Recording.fixture(name)
+            for (i in 0 until rec.size) d.processSample(rec.t[i], rec.data[i][0], rec.data[i][1], rec.data[i][2])
+            assertNull(name, d.lastVerdict)
+        }
+    }
+
     @Test
     fun noFalseAlarmsOnRealDailyActivities() {
         for (name in listOf("walking_pocket", "jogging_pocket", "upstairs_pocket", "sitting_pocket", "standing_pocket")) {

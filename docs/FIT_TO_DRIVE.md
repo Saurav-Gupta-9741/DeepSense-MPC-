@@ -481,3 +481,18 @@ legs pushing at every reversal), five attempts each with the phone in a trouser 
 pocket and held in the hand with the screen on, all reach the score; spinning one way never does
 and is told to turn back; and the whole pipeline from raw, jittered sensor events (resampling,
 engine, fit-to-drive) asks "Are you OK?" exactly once.
+
+## v3.10: the fall card says why a drop was not a fall
+
+On the phone, dropping it 1 m onto a pile of books gave no fall and no explanation. That is by
+design: since v3.4 a fall needs a body's impact (three samples above 1.5 g within 0.4 s); a phone
+landing on books or a table rings for one sample, exactly like the table put-down that once said
+"Fall detected". And a phone dropped from the hand with the app on screen counts as being put down.
+But the screen said nothing. Now, after every drop of about 45 cm or more (0.3 s of free fall), the
+Fall detection card says, for 10 minutes, *Last drop at 19:42 (3.4 g):* and one of: a fall; not
+counted (in the hand with the screen on, lock the screen to test); not a fall, a hard landing (use a
+cushion or mattress); not a fall, it moved again within 8 s; not a fall, it landed the same way up;
+not judged, sensor data missing. Steps, jogging and stairs never show a reason (a step in a pocket
+stays light for about 0.2 s; real recordings tested).
+
+Tests (2 new, 158 JVM tests): every kind of drop gets its reason; everyday movement never does.
