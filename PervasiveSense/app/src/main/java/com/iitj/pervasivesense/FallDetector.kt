@@ -1,5 +1,6 @@
 package com.iitj.pervasivesense
 
+import kotlin.math.abs
 import kotlin.math.acos
 import kotlin.math.sqrt
 
@@ -12,13 +13,11 @@ enum class FallState {
 /** What the detector decided about the last drop (a free fall then an impact), so the screen can say why. */
 enum class FallCheck {
     FALL,
-    /** The phone was in the hand and looked at: that is putting it down. */
-    HELD,
-    /** One sharp tick (a phone landing on a table or books); a body lands softer. */
+    /** One sharp tick after a short dip (a phone put down on a table); a body lands softer. */
     HARD_LANDING,
-    /** It moved again during the observation (got up, picked up). */
+    /** It kept moving (got up and walked, or the phone was picked up). */
     MOVED,
-    /** It landed the same way up as before: no standing-to-lying. */
+    /** It ended up the same way as before, upright: a jump, still standing. */
     NO_TURN,
     /** It fell (a real drop) but landed too softly to tell (impact below the threshold): a deep pillow. */
     SOFT_LANDING,
@@ -28,37 +27,32 @@ enum class FallCheck {
 
 class FallVerdict(val tNanos: Long, val peakG: Float, val check: FallCheck)
 
-/** Spoken coaching during "Test fall detection". */
-enum class FallTestTip {
-    /** An impact after a drop: keep still. */
-    IMPACT,
-    /** A drop was judged and was not a fall: say why ([FallCheck]). */
-    VERDICT,
-    /** The test time ran out. */
-    ENDED
-}
-
 /**
- * Multi-phase fall detector (threshold + posture-change + inactivity model).
+ * Multi-phase fall detector (threshold + posture + inactivity model). Always on: there is no
+ * test mode, because nobody knows when a person will fall.
  *
  *  1. Pre-impact: a low-g phase within [freeFallLookbackSec] before the impact - the
  *     body/phone accelerates toward the ground: at least [minLowGSamples] samples
  *     below [lowG] (≈ 0.1 s), one of them below [freeFallG]. Moving the phone by
  *     hand dips for a moment only.
- *  2. Impact: |a| > [impactG], and a body's impact, not a phone's tick: at least
- *     [minImpactSamples] samples above [impactBodyG] within [impactWindowSec].
- *     A phone dropped or put down on a table rings for one sample (real phone:
- *     put on a table, it said "Fall detected").
- *     Never while the phone is held and looked at ([processSample] `held`) in the
- *     [heldGraceSec] before the impact: that is the phone being put down.
+ *  2. Impact: |a| > [impactG]. Two kinds of fall:
+ *     - **A real drop** ([reportDropSamples] samples in a row below [lowG], 0.3 s, about 45 cm or
+ *       more): a person falling, or the phone flying out of the hand of a person who falls. It counts
+ *       whatever it hits (a hard floor rings once) and even while the phone was in use.
+ *     - **A short dip**: must be a body's impact, not a phone's tick (at least [minImpactSamples]
+ *       samples above [impactBodyG] within [impactWindowSec]; a phone put down on a table rings for
+ *       one sample), and never while the phone is held and looked at ([processSample] `held`) in the
+ *       [heldGraceSec] before the impact: that is the phone being put down.
  *  3. Settling: the first [settleSec] after impact contain bounces and are
  *     deliberately NOT used for the immobility test (including them made the
  *     original implementation reject genuine falls).
- *  4. Observation for [observeSec]: the person must be immobile
- *     (std of |a| < [immobileStdG]) AND the device orientation must have changed
- *     by at least [minOrientationChangeDeg] compared to before the fall
- *     (upright -> lying). Stomping or jumping and then standing still fails
- *     the orientation test; getting up and moving fails the immobility test.
+ *  4. Observation for [observeSec]: immobile (std of |a| < [immobileStdG]) AND lying: turned by at
+ *     least [minOrientationChangeDeg] from before the fall (standing to lying), or, after a real
+ *     drop, resting flat on the ground (a phone that left the hand lands flat, whichever way up it
+ *     was held). A jump with the phone in a pocket, then standing still, fails both.
+ *  5. Still moving at first (trying to get up): watched for up to [lateWatchSec] after the impact.
+ *     Lying still later, turned at least [lateTurnDeg] (clearly lying, not just picked up and held),
+ *     is a fall; still and upright again (got up) or moving all along is not.
  *
  * Once confirmed the state latches until [acknowledge] (user tapped "I'm OK")
  * or [reset]. All timing uses sensor timestamps.
@@ -78,8 +72,12 @@ class FallDetector(
     private val immobileStdG: Float = 0.10f,
     private val minOrientationChangeDeg: Float = 30f,
     private val maxGapSec: Float = 1.0f,
-    /** A drop worth explaining on screen: this many samples in a row below [lowG] (0.3 s, a drop of about 45 cm or more). A step in a pocket stays light for about 10 (real walking). */
-    private val reportDropSamples: Int = 15
+    /** A real drop: this many samples in a row below [lowG] (0.3 s, a drop of about 45 cm or more). A step in a pocket stays light for about 10 (real walking). */
+    private val reportDropSamples: Int = 15,
+    /** Lying flat: the screen's axis within about 25° of vertical (cos 25°). */
+    private val flatCos: Float = 0.9f,
+    private val lateWatchSec: Float = 30f,
+    private val lateTurnDeg: Float = 60f
 ) {
     companion object {
         const val G = 9.80665f
@@ -117,6 +115,12 @@ class FallDetector(
 
     private var impactT = 0L
     private var impactSamples = 0
+    /** The impact followed a real drop ([reportDropSamples]): no body-impact or hand rule. */
+    private var dropped = false
+    /** The current observation window started then. */
+    private var obsStartT = 0L
+    /** Moving in the first window: watching for lying still later ([lateWatchSec]). */
+    private var lateWatch = false
     private var lastHeldT = Long.MIN_VALUE
     private var lastT = Long.MIN_VALUE
     private val preImpactDir = FloatArray(3)
@@ -128,7 +132,8 @@ class FallDetector(
 
     /**
      * Returns true exactly once, on the sample that confirms a fall. [held]: the phone is in
-     * the hand and looked at (screen on, uncovered): an impact then is the phone being put down.
+     * the hand and looked at (screen on, uncovered): a short dip and an impact then is the phone
+     * being put down (a real drop from the hand still counts).
      */
     fun processSample(tNanos: Long, ax: Float, ay: Float, az: Float, held: Boolean = false): Boolean {
         val gap = lastT != Long.MIN_VALUE && (tNanos - lastT) > (maxGapSec * 1e9f).toLong()
@@ -140,7 +145,7 @@ class FallDetector(
 
         when (currentState) {
             FallState.MONITORING -> {
-                // A drop that never hits hard: say "too soft" (a test onto a deep pillow).
+                // A drop that never hits hard: say "too soft" (a drop onto a deep pillow).
                 if (magG < lowG) lowRun++ else {
                     if (lowRun >= reportDropSamples) { softUntil = tNanos + 500_000_000L; softPeak = 0f }
                     lowRun = 0
@@ -153,18 +158,19 @@ class FallDetector(
                         lastVerdict = FallVerdict(tNanos, softPeak, FallCheck.SOFT_LANDING)
                     }
                 }
-                if (magG > impactG && heldRecently && hadPreImpactLowG(tNanos)) {
-                    // Dropped from the hand while looked at: say so once per drop.
-                    reportable = deepLowGSamples(tNanos) >= reportDropSamples
-                    val v = lastVerdict
-                    if (v == null || v.check != FallCheck.HELD || tNanos - v.tNanos > 1_000_000_000L) verdict(tNanos, magG, FallCheck.HELD)
-                } else if (magG > impactG && hadPreImpactLowG(tNanos) && estimatePreImpactDirection(tNanos)) {
-                    reportable = deepLowGSamples(tNanos) >= reportDropSamples
-                    currentState = FallState.IMPACT_SUSPECTED
-                    impactT = tNanos
-                    impactSamples = 1
-                    lastImpactPeakG = magG
-                    obsN = 0; obsMean = 0.0; obsM2 = 0.0; obsSum.fill(0.0)
+                if (magG > impactG && hadPreImpactLowG(tNanos)) {
+                    val realDrop = deepLowGSamples(tNanos) >= reportDropSamples
+                    // A short dip with the phone in use: putting it down. A real drop from the hand counts.
+                    if ((realDrop || !heldRecently) && estimatePreImpactDirection(tNanos)) {
+                        reportable = realDrop
+                        dropped = realDrop
+                        currentState = FallState.IMPACT_SUSPECTED
+                        impactT = tNanos
+                        impactSamples = 1
+                        lastImpactPeakG = magG
+                        lateWatch = false
+                        startObservation(tNanos + (settleSec * 1e9f).toLong())
+                    }
                 }
             }
             FallState.IMPACT_SUSPECTED -> {
@@ -175,31 +181,34 @@ class FallDetector(
                 } else if (sinceImpact < impactWindowSec) {
                     if (magG > impactBodyG) impactSamples++
                     if (magG > lastImpactPeakG) lastImpactPeakG = magG
-                } else if (impactSamples < minImpactSamples) {
+                } else if (!dropped && impactSamples < minImpactSamples) {
                     currentState = FallState.MONITORING // a sharp tick: the phone hit something, the body did not
                     verdict(impactT, lastImpactPeakG, FallCheck.HARD_LANDING)
-                } else if (sinceImpact < settleSec) {
+                } else if (tNanos < obsStartT) {
                     if (magG > lastImpactPeakG) lastImpactPeakG = magG
-                } else if (sinceImpact < settleSec + observeSec) {
+                } else if (tNanos - obsStartT < (observeSec * 1e9f).toLong()) {
                     obsN++
                     val d = magG - obsMean
                     obsMean += d / obsN
                     obsM2 += d * (magG - obsMean)
                     obsSum[0] += ax.toDouble(); obsSum[1] += ay.toDouble(); obsSum[2] += az.toDouble()
                 } else {
-                    val std = if (obsN > 1) sqrt(obsM2 / (obsN - 1)) else Double.MAX_VALUE
+                    val still = obsN >= 10 && sqrt(obsM2 / (obsN - 1)) < immobileStdG
                     val change = angleDeg(preImpactDir, obsSum)
-                    if (obsN >= 10 && std < immobileStdG && change >= minOrientationChangeDeg) {
-                        currentState = FallState.FALL_CONFIRMED
-                        confirmed = true
-                        verdict(impactT, lastImpactPeakG, FallCheck.FALL)
-                    } else {
-                        currentState = FallState.MONITORING
-                        verdict(impactT, lastImpactPeakG, when {
-                            obsN < 10 -> FallCheck.GAP
-                            std >= immobileStdG -> FallCheck.MOVED
-                            else -> FallCheck.NO_TURN
-                        })
+                    val lying = if (lateWatch) change >= lateTurnDeg
+                        else change >= minOrientationChangeDeg || (dropped && restingFlat())
+                    when {
+                        obsN < 10 -> end(FallCheck.GAP)
+                        still && lying -> {
+                            currentState = FallState.FALL_CONFIRMED
+                            confirmed = true
+                            verdict(impactT, lastImpactPeakG, FallCheck.FALL)
+                        }
+                        // Still and upright: never fell (a jump), or got up (or picked the phone up and holds it).
+                        still && change < minOrientationChangeDeg -> end(if (lateWatch) FallCheck.MOVED else FallCheck.NO_TURN)
+                        // Moving (trying to get up?), or half turned: keep watching for a while.
+                        sinceImpact < settleSec + lateWatchSec -> { lateWatch = true; startObservation(tNanos) }
+                        else -> end(if (still) FallCheck.NO_TURN else FallCheck.MOVED)
                     }
                 }
             }
@@ -209,13 +218,26 @@ class FallDetector(
         return confirmed
     }
 
+    private fun end(check: FallCheck) {
+        currentState = FallState.MONITORING
+        verdict(impactT, lastImpactPeakG, check)
+    }
+
+    private fun startObservation(from: Long) {
+        obsStartT = from
+        obsN = 0; obsMean = 0.0; obsM2 = 0.0; obsSum.fill(0.0)
+    }
+
+    /** Lying flat (screen up or down): gravity along the screen's axis. */
+    private fun restingFlat(): Boolean {
+        val n = sqrt(obsSum[0] * obsSum[0] + obsSum[1] * obsSum[1] + obsSum[2] * obsSum[2])
+        return n > 1e-6 && abs(obsSum[2]) >= flatCos * n
+    }
+
     /** User confirmed they are OK, or recovery (sustained walking) was observed. */
     fun acknowledge() {
         if (currentState == FallState.FALL_CONFIRMED) currentState = FallState.MONITORING
     }
-
-    /** "Test fall detection" started: the phone having been in the hand a moment ago no longer counts. */
-    fun forgetHeld() { lastHeldT = Long.MIN_VALUE }
 
     fun reset() {
         currentState = FallState.MONITORING

@@ -65,6 +65,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
         private const val SERVICE_PREFS = "pervasivesense_service"
         private const val KEY_RUNNING = "running"
+        /** "Stop sensing" tapped: the app does not start sensing by itself until "Start" is tapped again. */
+        private const val KEY_USER_STOPPED = "user_stopped"
 
         /** Sensing was on (not stopped by the user): restarted after a reboot or an app update. */
         fun wasRunning(context: Context) =
@@ -73,6 +75,13 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         private fun setRunning(context: Context, on: Boolean) =
             context.getSharedPreferences(SERVICE_PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_RUNNING, on).apply()
 
+        /** Sensing (and with it fall detection) is on by default: off only after "Stop sensing". */
+        fun userStopped(context: Context) =
+            context.getSharedPreferences(SERVICE_PREFS, Context.MODE_PRIVATE).getBoolean(KEY_USER_STOPPED, false)
+
+        private fun setUserStopped(context: Context, on: Boolean) =
+            context.getSharedPreferences(SERVICE_PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_USER_STOPPED, on).apply()
+
         /** Started and not yet destroyed in this process (the watchdog leaves a running service alone). */
         @Volatile var alive = false
             private set
@@ -80,6 +89,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         /** "Stop sensing" on the dashboard: not restarted by the watchdog or after a reboot. */
         fun stopByUser(context: Context) {
             setRunning(context, false)
+            setUserStopped(context, true)
             WatchdogReceiver.cancel(context)
             context.stopService(Intent(context, SensingForegroundService::class.java))
         }
@@ -169,6 +179,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             setRunning(this, false) // stopped by the user: not restarted after a reboot
+            setUserStopped(this, true)
             WatchdogReceiver.cancel(this)
             stopSelf()
             return START_NOT_STICKY
@@ -200,6 +211,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         started = true
         alive = true
         setRunning(this, true)
+        setUserStopped(this, false)
         WatchdogReceiver.schedule(this)
         notificationManager.cancel(WatchdogReceiver.STOPPED_NOTIFICATION_ID)
         SensingRepository.setMessage(null)
@@ -364,8 +376,8 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
 
     override fun onFallConfirmed(snapshot: SensingSnapshot) {
         engine?.let { saveDailyState(it.wellness.exportState()) }
-        // With a contact: "Are you OK?" over the lock screen, out loud; no answer in 60 s texts and calls them.
-        if (alert().start(AlertKind.FALL, test = snapshot.fallTestSecondsLeft > 0)) return
+        // With a contact: "Are you OK?" over the lock screen, out loud; no answer in 60 s texts them (no call).
+        if (alert().start(AlertKind.FALL)) return
         // No contact set up: the phone itself still asks, loudly, and shows the alert.
         speak(getString(R.string.fall_say_no_contact), alarm = true)
         val open = PendingIntent.getActivity(this, 11,
@@ -395,20 +407,6 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         // Got up and walking: nobody needs to be alerted.
         contactAlert?.cancelKind(AlertKind.FALL)
         notificationManager.cancel(FALL_NOTIFICATION_ID)
-    }
-
-    override fun onFallTest(tip: FallTestTip, check: FallCheck?) {
-        speak(getString(when (tip) {
-            FallTestTip.IMPACT -> R.string.fall_test_say_impact
-            FallTestTip.ENDED -> R.string.fall_test_say_ended
-            FallTestTip.VERDICT -> when (check) {
-                FallCheck.HARD_LANDING -> R.string.fall_test_say_hard
-                FallCheck.SOFT_LANDING -> R.string.fall_test_say_soft
-                FallCheck.MOVED -> R.string.fall_test_say_moved
-                FallCheck.NO_TURN -> R.string.fall_test_say_no_turn
-                else -> R.string.fall_test_say_gap
-            }
-        }), interrupt = tip != FallTestTip.ENDED)
     }
 
     override fun onBreakDue(snapshot: SensingSnapshot) {
@@ -644,11 +642,6 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         notificationManager.cancel(FALL_NOTIFICATION_ID)
     }
 
-    override fun startFallTest() {
-        handler.post { if (engine?.startFallTest() == true) speak(getString(R.string.fall_test_say_start)) }
-    }
-
-    override fun stopFallTest() { handler.post { engine?.stopFallTest() } }
 
     override fun helpNow() { handler.post { contactAlert?.sendNow() } }
 

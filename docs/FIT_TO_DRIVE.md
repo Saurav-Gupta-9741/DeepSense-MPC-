@@ -531,3 +531,30 @@ Tests (2 new, 158 JVM tests): every kind of drop gets its reason; everyday movem
   call on speaker from the floor helps nobody; the contact calls back instead. Driving alerts still
   text and then call. The status line reads "Alert sent to ... at HH:MM".
 - Tests (1 new, 163 JVM tests): a fall alert never calls; every driving alert and the test alert may.
+
+## v3.13: fall detection always on, every real fall counts
+
+- **No test mode.** Nobody knows when a person will fall, so there is no "Test fall detection"
+  button: fall detection always runs in the background with sensing, and sensing now starts by
+  itself when the app opens (only **Stop sensing** keeps it off; it restarts after a reboot or an
+  update). A fall texts the trusted contact as soon as one is saved, even with the driving alert
+  switch off. The card says who a fall reaches.
+- **Every real kind of fall counts.** A real drop (0.3 s of free fall, about 45 cm or more: a person
+  falling, or the phone flying out of the hand of a person who falls) is a fall:
+  - whatever it hits: a hard floor or books (one sharp tick) counted before as "a hard landing";
+  - even while the phone was in use (screen on): counted before as "in your hand";
+  - whichever way up it lands: a phone that left the hand lies flat, so lying flat and still is
+    enough; before, a phone held flat that landed flat was "not turned".
+- **Moving after a fall, then lying still.** A person who tries to get up and cannot (moving at
+  first, then lying still within 30 s) is a fall; before, any movement in the first 8 s ended it.
+- **Still not a fall:** the phone picked up again (it keeps moving or is held upright), a jump with
+  the phone in a pocket and standing still (still upright), a phone put down on a table (a short
+  dip and a tick; with the screen on, any short dip), and everyday movement (walking, jogging,
+  stairs, sitting) on real recordings.
+- **Trade-off:** a phone dropped or tossed from 45 cm or more that then lies still asks "Did you
+  fall? Are you OK?"; one tap on **I'm OK** ends it. That is the price of catching falls where the
+  phone flies out of the hand.
+- Tests (7 new, 170 JVM tests): a real drop from the hand in use; held flat, landed flat on books
+  (the reported phone case), screen up and down; a pocket fall onto a hard floor; struggling then
+  lying still; getting up and standing; a dropped phone picked up (at once and after 3 s); a jump
+  down from a step; plus the engine end to end with the screen on and off.

@@ -104,10 +104,8 @@ class SensingEngineTest {
         override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) { fit += event }
         val falls = ArrayList<SensingSnapshot>()
         var cleared = 0
-        val fallTips = ArrayList<Pair<FallTestTip, FallCheck?>>()
         override fun onFallConfirmed(snapshot: SensingSnapshot) { falls += snapshot }
         override fun onFallCleared() { cleared++ }
-        override fun onFallTest(tip: FallTestTip, check: FallCheck?) { fallTips += tip to check }
     }
 
     /**
@@ -139,42 +137,25 @@ class SensingEngineTest {
     }
 
     @Test
-    fun aDropFromTheHandWithTheScreenOnIsIgnoredButCountsInAFallTest() {
-        // Normally: the phone in the hand, looked at (this app on screen), let go: putting it down, no fall.
-        run {
-            val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
-            e.setUiVisible(true)
-            play(e, drop())
-            assertTrue(r.falls.isEmpty())
-            assertEquals(FallCheck.HELD, r.snapshots.last().lastFallCheck?.check)
-        }
-        // "Test fall detection": the same drop is a fall, and the impact was announced.
+    fun aDropFromTheHandWithTheScreenOnIsAFall() {
+        // Always on, no test mode: the phone in use (this app on screen) flies out of the hand of a
+        // person who falls, lands on a cushion-like surface and lies there.
         val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
         e.setUiVisible(true)
-        val rec = drop()
-        val held = Recording(rec.t.copyOfRange(0, 150), rec.data.copyOfRange(0, 150))
-        val rest = Recording(LongArray(rec.size - 150) { it * 20_000_000L }, rec.data.copyOfRange(150, rec.size))
-        play(e, held)
-        assertTrue(e.startFallTest())
-        assertTrue(r.snapshots.last().fallTestSecondsLeft in 179..180)
-        play(e, rest, at = start + 150 * 20_000_000L)
-        assertEquals("tips=${r.fallTips} last=${r.snapshots.last().lastFallCheck?.check}", 1, r.falls.size)
-        assertTrue(r.falls.single().fallTestSecondsLeft > 0) // the alert knows it is a test
-        assertEquals(FallTestTip.IMPACT, r.fallTips.first().first)
+        play(e, drop())
+        assertEquals("last=${r.snapshots.last().lastFallCheck?.check}", 1, r.falls.size)
         assertEquals(FallCheck.FALL, r.snapshots.last().lastFallCheck?.check)
     }
 
     @Test
-    fun aHardLandingInAFallTestIsExplainedOutLoud() {
-        val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
-        val rec = drop(hard = true)
-        val held = Recording(rec.t.copyOfRange(0, 150), rec.data.copyOfRange(0, 150))
-        val rest = Recording(LongArray(rec.size - 150) { it * 20_000_000L }, rec.data.copyOfRange(150, rec.size))
-        play(e, held)
-        e.startFallTest()
-        play(e, rest, at = start + 150 * 20_000_000L)
-        assertTrue(r.falls.isEmpty())
-        assertTrue(r.fallTips.toString(), r.fallTips.contains(FallTestTip.VERDICT to FallCheck.HARD_LANDING))
+    fun aHardFloorLandingFromTheHandIsAFall() {
+        // Onto a hard floor (or books): one sharp tick. A person who falls drops the phone onto hard floors too.
+        for (screenOn in listOf(true, false)) {
+            val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
+            e.setScreenOn(screenOn); e.setUiVisible(screenOn)
+            play(e, drop(hard = true))
+            assertEquals("screen on: $screenOn", 1, r.falls.size)
+        }
     }
 
     @Test

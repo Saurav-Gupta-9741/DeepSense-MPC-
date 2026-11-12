@@ -235,12 +235,95 @@ class FallDetectorTest {
 
     @Test
     fun phonePutDownWhileLookingAtItIsNotAFall() {
-        // Even a fall-like put-down (long dip, heavy contact) while the phone was held and looked at.
-        val b = Builder().inHand(3.0).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
+        // Even a fall-like put-down (a short dip, heavy contact) while the phone was held and looked at.
+        val b = Builder().inHand(3.0).freeFall(0.2).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
         val heldUntil = 3 * 50 + 10
         assertFalse(b.run(FallDetector()) { it < heldUntil }.first)
         // The same motion with the phone on the body (not held) is a fall: the gate is only the hand.
         assertTrue(b.run(FallDetector()).first)
+    }
+
+    // ---- Always on, every real fall (there is no test mode: nobody knows when a person falls)
+
+    private val heldUntil: (Int) -> Boolean = { it < 3 * 50 + 10 }
+
+    @Test
+    fun aRealDropFromTheHandIsAFallEvenWhileLookingAtIt() {
+        // Walking while using the phone, tripping: the phone flies 1 m and lies where it lands.
+        val b = Builder().inHand(3.0).freeFall(0.45).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
+        assertTrue(b.run(FallDetector(), heldUntil).first)
+    }
+
+    @Test
+    fun aPhoneHeldFlatThatLandsFlatOnAHardFloorIsAFall() {
+        // Real phone: held nearly flat, dropped 1 m onto books (12 g, one tick), landed flat the same way
+        // up. Was "not a fall: it landed the same way up" and, outside the old test mode, "in your hand".
+        val b = Builder().hold(3.0, 0f, 0.17f * G, 0.98f * G, 0.03f).freeFall(0.45)
+            .hold(0.02, 0f, 0f, 12f * G, 0f).hold(0.02, 0f, 0f, 0.6f * G, 0f).hold(12.0, 0f, 0f, G, 0.005f)
+        val d = FallDetector()
+        assertTrue(b.run(d, heldUntil).first)
+        assertEquals(FallCheck.FALL, d.lastVerdict?.check)
+        // Screen down on the floor counts the same.
+        val down = Builder().hold(3.0, 0f, 0.17f * G, 0.98f * G, 0.03f).freeFall(0.45)
+            .hold(0.02, 0f, 0f, 12f * G, 0f).hold(0.02, 0f, 0f, 0.6f * G, 0f).hold(12.0, 0f, 0f, -G, 0.005f)
+        assertTrue(down.run(FallDetector()).first)
+    }
+
+    @Test
+    fun aFallFromThePocketOntoAHardFloorIsAFall() {
+        // Standing, phone in the trouser pocket, falls; the body hits the floor and lies still.
+        val b = Builder().append(standing()).freeFall(0.4).hold(0.02, 0f, 3f * G, 2f * G, 0f)
+            .hold(0.02, 0f, 0f, 0.8f * G, 0f).hold(12.0, G * 0.1f, 0f, G, 0.01f)
+        assertTrue(b.run(FallDetector()).first)
+    }
+
+    @Test
+    fun someoneWhoStrugglesAfterAFallThenLiesStillIsAFall() {
+        // Fell, tried to get up for 5 s (moving, still lying), could not, lies still.
+        val rnd = Random(9)
+        val b = Builder().append(standing()).freeFall(0.35).impact(4f).bounces(0.8)
+        repeat(250) { b.rows += floatArrayOf((rnd.nextGaussian() * 3).toFloat(), (rnd.nextGaussian() * 3).toFloat(), G + (rnd.nextGaussian() * 3).toFloat()) }
+        b.hold(20.0, 0f, 0f, G, 0.01f)
+        val d = FallDetector()
+        assertTrue(b.run(d).first)
+        assertEquals(FallCheck.FALL, d.lastVerdict?.check)
+    }
+
+    @Test
+    fun someoneWhoGetsUpAfterAFallAndStandsIsNotAFall() {
+        val rnd = Random(9)
+        val b = Builder().append(standing()).freeFall(0.35).impact(4f).bounces(0.8)
+        repeat(250) { b.rows += floatArrayOf((rnd.nextGaussian() * 3).toFloat(), (rnd.nextGaussian() * 3).toFloat(), G + (rnd.nextGaussian() * 3).toFloat()) }
+        b.append(standing()).append(standing())
+        val d = FallDetector()
+        assertFalse(b.run(d).first)
+        assertEquals(FallCheck.MOVED, d.lastVerdict?.check)
+    }
+
+    @Test
+    fun aDroppedPhonePickedUpAgainIsNotAFall() {
+        val rnd = Random(4)
+        val b = Builder().inHand(3.0).freeFall(0.45).impact(4f).bounces(0.8)
+        // Picked up (2 s of handling), then used in the hand for 40 s.
+        repeat(100) { b.rows += floatArrayOf((rnd.nextGaussian() * 4).toFloat(), (rnd.nextGaussian() * 4).toFloat(), G + (rnd.nextGaussian() * 4).toFloat()) }
+        b.inHand(40.0)
+        val d = FallDetector()
+        assertFalse(b.run(d, heldUntil).first)
+        assertEquals(FallCheck.MOVED, d.lastVerdict?.check)
+        // ...or picked up after lying 3 s, and kept in the hand.
+        val late = Builder().inHand(3.0).freeFall(0.45).impact(4f).bounces(0.8).hold(3.0, 0f, 0f, G, 0.005f)
+        repeat(100) { late.rows += floatArrayOf((rnd.nextGaussian() * 4).toFloat(), (rnd.nextGaussian() * 4).toFloat(), G + (rnd.nextGaussian() * 4).toFloat()) }
+        late.inHand(40.0)
+        assertFalse(late.run(FallDetector(), heldUntil).first)
+    }
+
+    @Test
+    fun aJumpDownFromAStepThenStandingIsNotAFall() {
+        // Phone in the pocket: jumping down (0.4 s in the air), landing, standing still upright.
+        val b = Builder().append(standing()).freeFall(0.4).impact(4f).bounces(0.5).append(standing())
+        val d = FallDetector()
+        assertFalse(b.run(d).first)
+        assertEquals(FallCheck.NO_TURN, d.lastVerdict?.check)
     }
 
     @Test
@@ -260,17 +343,14 @@ class FallDetectorTest {
     fun everyDropGetsAReason() {
         // A body's fall: FALL.
         assertEquals(FallCheck.FALL, verdictOf(Builder().append(standing()).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)))
-        // A phone dropped 1 m onto a pile of books (one sharp tick): HARD_LANDING. (Let go 10 cm above a
-        // table is too small a drop to explain on screen.)
+        // A phone dropped 1 m onto a pile of books (one sharp tick), even from the hand in use: FALL (a
+        // person who falls drops it like that). Let go 10 cm above a table is too small a drop to explain.
         assertNull(verdictOf(droppedOnTable()))
-        assertEquals(FallCheck.HARD_LANDING, verdictOf(Builder().inHand(3.0).freeFall(0.45)
-            .hold(0.02, 0f, 0f, 6f * G, 0f).hold(0.02, 0f, 0f, 0.6f * G, 0f).hold(12.0, 0f, 0f, G, 0.005f)))
-        // Dropped from the hand while looked at (the app on screen): HELD.
-        val inHandDrop = Builder().inHand(3.0).freeFall(0.35).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
-        assertEquals(FallCheck.HELD, verdictOf(inHandDrop) { it < 3 * 50 + 10 })
-        // Picked up again straight away: MOVED.
+        assertEquals(FallCheck.FALL, verdictOf(Builder().inHand(3.0).freeFall(0.45)
+            .hold(0.02, 0f, 0f, 6f * G, 0f).hold(0.02, 0f, 0f, 0.6f * G, 0f).hold(12.0, 0f, 0f, G, 0.005f)) { it < 3 * 50 + 10 })
+        // Got up and walked away, then stood: MOVED.
         assertEquals(FallCheck.MOVED, verdictOf(Builder().append(standing()).freeFall(0.35).impact(4f).bounces(0.8)
-            .append(Recording.fixture("walking_pocket"))))
+            .append(Recording.fixture("walking_pocket")).append(standing())))
         // Landed the same way up: NO_TURN.
         val st = standing()
         val up = floatArrayOf(st.data.map { it[0] }.average().toFloat(), st.data.map { it[1] }.average().toFloat(), st.data.map { it[2] }.average().toFloat())

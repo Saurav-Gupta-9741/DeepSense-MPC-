@@ -60,16 +60,17 @@ Simulate with the phone only, onto something soft but firm (sofa cushion or matt
 
 | # | Do this | Pass if |
 |---|---|---|
-| E1 | **Lock the screen**, hold the phone upright at ~1 m, drop it onto the cushion or a mattress (not a table, books or the floor), **don't touch it for 10 s** | Card shows *Checking impact…*, then **Fall detected** after ~7.5 s; a fall-alert notification appears |
-| E0 | Fall detection card › **Test fall detection** (3 min), then drop as in E1, screen on or off | The phone says *Impact felt…*; with a trusted contact: **TEST · Did you fall? Are you OK?** over the screen, *I'm OK* / *Get help now*; no answer in 60 s: a TEST text and **no call** (a fall never calls). A hard landing is explained out loud |
-| E1b | Same drop onto books or a table | No fall. Under Fall detection: *Last drop at … : not a fall. A hard landing that rings once…* |
-| E1c | Same drop onto the cushion with the app open on the screen | No fall. *Last drop at … : not counted. The phone was in your hand with the screen on…* |
+| E0 | Open the app after installing (sensing not started) | Sensing starts by itself; the Fall detection card says *Always on…* and who a fall reaches. There is no test button |
+| E1 | Hold the phone ~1 m up (screen locked **or** the app open, any way up), drop it onto the floor, books, a cushion or a mattress, **don't touch it for 10 s** | *Checking impact…*, then **Did you fall? Are you OK?** over the screen after ~7.5 s, buzzing and spoken, with *I'm OK* / *Get help now* |
+| E1a | As E1 with a trusted contact saved, don't answer for 60 s | The contact gets *PervasiveSense alert: I may have fallen…* with the location, and **no call** (a fall never calls) |
+| E1b | Drop it, pick it up within 2 to 3 s and keep holding it | No alert. After up to 30 s: *Last drop at … : not a fall. It kept moving after landing…* |
+| E1c | Put the phone down on a table from a few cm (screen on or off) | No alert, nothing shown |
 | E2 | Tap **I'm OK** (on the card or in the notification) | Card returns to *Monitoring*; the alert disappears |
-| E3 | Jump in place, then stand still | No fall alert (body orientation did not change). *Checking impact…* may flash briefly, then returns to *Monitoring* |
+| E3 | Phone in a trouser pocket: jump in place (or down from a step), then stand still | No fall alert. *Checking impact…* for a few seconds, then *not a fall. It ended up upright…* |
 | E4 | Walk, sit down firmly on a chair | No fall alert |
 
-If E1 does not trigger, the Fall detection card says why (*Last drop at …*). If it says nothing, the landing was too soft (impact below 2.5 g). Try a
-firmer cushion. Safety score in Daily wellness drops by 25 per confirmed fall.
+If E1 does not trigger, the Fall detection card says why (*Last drop at …*). If it says the landing was too soft, drop it onto
+the floor or a firmer surface; if it says nothing, the drop was too short (under about 45 cm). Safety score in Daily wellness drops by 25 per confirmed fall.
 
 ## F. Vehicle & road hazards (**as a passenger only**)
 
@@ -147,5 +148,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 163 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 170 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

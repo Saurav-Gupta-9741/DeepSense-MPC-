@@ -56,10 +56,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.btnFallAck.setOnClickListener { SensingRepository.acknowledgeFall() }
-        binding.btnFallTest.setOnClickListener {
-            if ((SensingRepository.snapshot.value?.fallTestSecondsLeft ?: 0) > 0) SensingRepository.stopFallTest()
-            else SensingRepository.startFallTest()
-        }
         val openFit = View.OnClickListener { startActivity(Intent(this, FitToDriveActivity::class.java)) }
         binding.cardFit.setOnClickListener(openFit)
         binding.btnFitOpen.setOnClickListener(openFit)
@@ -71,6 +67,9 @@ class MainActivity : AppCompatActivity() {
         }
         applyDiagnosticsVisibility()
         handleIntent(intent)
+        // On by default (fall detection must run all the time): only "Stop sensing" keeps it off.
+        if (savedInstanceState == null && SensingRepository.status.value == ServiceStatus.STOPPED &&
+            !SensingForegroundService.userStopped(this)) requestPermissionsThenStart()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -324,10 +323,11 @@ class MainActivity : AppCompatActivity() {
         tvFallStatus.setTextColor(color(dot))
         // While monitoring: why the last drop (within 10 min) was or was not a fall.
         val c = s.lastFallCheck?.takeIf { s.fallState == FallState.MONITORING && System.currentTimeMillis() - it.wallMillis < 600_000L }
-        tvFallDetail.text = if (c == null) getString(detail) else getString(R.string.fall_last_check,
+        tvFallDetail.text = if (c == null) {
+            if (s.fallState == FallState.MONITORING) fallWatchText() else getString(detail)
+        } else getString(R.string.fall_last_check,
             fitTime.format(Date(c.wallMillis)), c.peakG, getString(when (c.check) {
                 FallCheck.FALL -> R.string.fall_check_fall
-                FallCheck.HELD -> R.string.fall_check_held
                 FallCheck.HARD_LANDING -> R.string.fall_check_hard
                 FallCheck.MOVED -> R.string.fall_check_moved
                 FallCheck.NO_TURN -> R.string.fall_check_no_turn
@@ -336,11 +336,12 @@ class MainActivity : AppCompatActivity() {
             }))
         fallDot.backgroundTintList = tint(dot)
         btnFallAck.visibility = if (s.fallState == FallState.FALL_CONFIRMED) View.VISIBLE else View.GONE
-        val left = s.fallTestSecondsLeft
-        btnFallTest.text = if (left > 0) getString(R.string.fall_test_stop, String.format(Locale.US, "%d:%02d", left / 60, left % 60))
-            else getString(R.string.fall_test)
-        if (left > 0 && c == null) tvFallDetail.setText(R.string.fall_test_hint)
     }
+
+    /** Fall detection is always on; say who a fall reaches. */
+    private fun fallWatchText(): String = if (ContactAlert.readyForFall(this))
+        getString(R.string.fall_monitoring_contact, FitToDriveStore.contactName(this).ifBlank { FitToDriveStore.contactPhone(this) })
+    else getString(R.string.fall_monitoring_no_contact)
 
     /** What the big button on the Fit to drive card does right now. */
     private enum class FitAction { TURN_ON, SET_UP, CHECK, BALANCE, CAB, START, NONE }

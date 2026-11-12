@@ -33,8 +33,6 @@ object SensingRepository {
     interface Controller {
         fun setUiVisible(visible: Boolean)
         fun acknowledgeFall()
-        fun startFallTest()
-        fun stopFallTest()
         fun helpNow()
         fun onVehicleConfidence(confidence: Int)
         fun setFitToDriveEnabled(enabled: Boolean)
@@ -96,10 +94,7 @@ object SensingRepository {
     }
 
     fun acknowledgeFall() { controller?.acknowledgeFall() }
-    /** "Test fall detection" (3 minutes): a drop from the hand counts, every drop is explained out loud. */
-    fun startFallTest() { controller?.startFallTest() }
-    fun stopFallTest() { controller?.stopFallTest() }
-    /** "Get help now" during a fall countdown: the text and the call go out at once. */
+    /** "Get help now" during a fall countdown: the text goes out at once. */
     fun helpNow() { controller?.helpNow() }
 
     fun deliverVehicleConfidence(confidence: Int) { controller?.onVehicleConfidence(confidence) }

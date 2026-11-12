@@ -170,6 +170,12 @@ class ContactAlert(
 
         fun canSendSms(c: Context) = c.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
 
+        /**
+         * A fall: a contact saved, SMS allowed and possible. Fall detection is always on, so the
+         * driving switch ("Alert my contact if I drive after a warning") is not needed for it.
+         */
+        fun readyForFall(c: Context) = FitToDriveStore.contactPhone(c).isNotBlank() && hasSmsPermission(c) && canSendSms(c)
+
         /** Opted in, a contact saved, SMS allowed and possible. */
         fun ready(c: Context) = FitToDriveStore.alertContact(c) && FitToDriveStore.contactPhone(c).isNotBlank() &&
             hasSmsPermission(c) && canSendSms(c)
@@ -206,7 +212,7 @@ class ContactAlert(
         val last = lastSent[k]
         // At most one alert of a kind per hour (no repeated texts on one bad trip); never for a fall.
         if (k != AlertKind.TEST && k != AlertKind.FALL && !test && last != null && now - last < REPEAT_MS) return false
-        if (!ready(context)) return false
+        if (!(if (k == AlertKind.FALL) readyForFall(context) else ready(context))) return false
         SensingRepository.setFailedSms(null)
         kind = k
         testRun = test
