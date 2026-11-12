@@ -61,6 +61,51 @@ fun cityDrive(seed: Int = 1) = drive(300.0, seed, fwd = { ts ->
 fun weavingDrive(seconds: Double = 60.0, peak: Double = 0.09, hz: Double = 0.2, seed: Int = 2) =
     drive(seconds, seed) { ts -> peak * sin(2 * PI * hz * ts) }
 
+/**
+ * A person turning a swivel chair by hand, as a test drive asks (seat frame: x forward, z up): swings
+ * left, then right, each of a random 15-60 degrees over a random 0.6-1.5 s, and (if [legs]) a push with
+ * the legs at every reversal that tilts a thigh-pocket phone (3 rad/s for 0.15 s and back). [hand]: the
+ * phone is held, the hand shaking it (about 1 rad/s). No sideways acceleration: a chair goes nowhere.
+ */
+fun chairTurning(seconds: Double, seed: Int = 170, legs: Boolean = true, hand: Boolean = false): Recording {
+    val rnd = Random(seed.toLong())
+    val n = (seconds * 50).toInt()
+    // The swings: start time, duration, peak turn rate (signed, alternating).
+    val starts = ArrayList<Double>(); val durs = ArrayList<Double>(); val peaks = ArrayList<Double>()
+    var at = 0.0; var dir = 1.0
+    while (at < seconds) {
+        val d = 0.6 + 0.9 * rnd.nextDouble()
+        val angle = Math.toRadians(15.0 + 45.0 * rnd.nextDouble())
+        starts += at; durs += d; peaks += dir * 2 * angle / d // a sin^2 profile: peak = 2 x angle / duration
+        at += d + 0.1 * rnd.nextDouble(); dir = -dir
+    }
+    return Recording(LongArray(n) { it * 20_000_000L }, Array(n) { i ->
+        val ts = i * 0.02
+        var yaw = 0.0; var push = 0.0; var tilt = 0.0
+        for (k in starts.indices) {
+            val p = ts - starts[k]
+            if (p in 0.0..durs[k]) { val x = sin(PI * p / durs[k]); yaw += peaks[k] * x * x }
+            if (legs && p in 0.0..0.3) {
+                push += if (p < 0.15) 3.0 else -3.0
+                tilt += if (p < 0.15) 3.0 * p else 3.0 * (0.3 - p)
+            }
+        }
+        val hx = if (hand) 0.8 * sin(2 * PI * 1.1 * ts) + 0.5 * sin(2 * PI * 2.3 * ts + 1) else 0.0
+        val hy = if (hand) 0.7 * sin(2 * PI * 0.9 * ts + 2) + 0.4 * sin(2 * PI * 1.9 * ts) else 0.0
+        floatArrayOf(
+            (rnd.nextGaussian() * 0.2).toFloat(),
+            (9.81 * sin(tilt) + rnd.nextGaussian() * 0.2).toFloat(),
+            (9.81 * cos(tilt) + rnd.nextGaussian() * 0.3).toFloat(),
+            (push + hx + rnd.nextGaussian() * 0.01).toFloat(),
+            (hy + rnd.nextGaussian() * 0.01).toFloat(),
+            (yaw + rnd.nextGaussian() * 0.01).toFloat())
+    })
+}
+
+/** Spinning a swivel chair round and round one way at [rate] rad/s (not weaving). */
+fun chairSpinning(seconds: Double, rate: Double = 1.5, seed: Int = 175) =
+    drive(seconds, seed, speed = 0.0) { ts -> rate * minOf(1.0, ts / 2.0) }
+
 class DrivingWatchTest {
 
     private fun run(w: DrivingWatch, rec: Recording, t0: Long = 0L, hasGyro: Boolean = true,
@@ -413,6 +458,45 @@ class DrivingWatchTest {
         val still = DrivingWatch(DrivingWatch.Config.forTestDrive())
         val quiet = Recording.constant(300.0, 0f, 0f, 9.81f, noise = 0.05f).rotated(placements[0].r)
         assertTrue(run(still, quiet).isEmpty())
+    }
+
+    @Test
+    fun aPersonTurningAChairByHandIsCaughtByTheTestDriveWhereverThePhoneIs() {
+        val still = Recording.constant(10.0, 0f, 0f, 9.81f, noise = 0.05f)
+        val places = listOf(
+            Triple("trouser pocket", placements[0].r, false),
+            Triple("shirt pocket", placements[1].r, false),
+            Triple("held in the hand, screen on", Recording.rotation(0.0, -40.0, 0.0), true))
+        for ((k, place) in places.withIndex()) {
+            for (seed in 0 until 5) { // five different attempts
+                val rec = Recording.concat(still, chairTurning(45.0, seed = 170 + 10 * k + seed, hand = place.third)).rotated(place.second)
+                val w = DrivingWatch(DrivingWatch.Config.forTestDrive())
+                run(w, rec, screen = { place.third })
+                assertTrue("${place.first} #$seed: score ${w.points(rec.t.last())}", w.clearlyErratic(rec.t.last()))
+            }
+        }
+    }
+
+    @Test
+    fun theLegsPushingTheChairWipedTheTestDriveWithTheHandCheckOn() {
+        // The control (v3.8's test drive kept the hand check of a real drive): every push of the legs
+        // jolted the pocket phone like a hand, and the turning seen so far was forgotten.
+        val rec = Recording.concat(Recording.constant(10.0, 0f, 0f, 9.81f, noise = 0.05f), chairTurning(45.0, seed = 170)).rotated(placements[0].r)
+        val old = DrivingWatch(DrivingWatch.Config.forTestDrive().copy(handlingRadS = 1.5f, handlingTiltDeg = 55f))
+        run(old, rec)
+        assertFalse("score ${old.points(rec.t.last())}", old.clearlyErratic(rec.t.last()))
+        val now = DrivingWatch(DrivingWatch.Config.forTestDrive())
+        run(now, rec)
+        assertTrue(now.clearlyErratic(rec.t.last()))
+    }
+
+    @Test
+    fun spinningAChairRoundOneWayIsNotWeaving() {
+        val rec = Recording.concat(Recording.constant(10.0, 0f, 0f, 9.81f, noise = 0.05f), chairSpinning(60.0)).rotated(placements[0].r)
+        val w = DrivingWatch(DrivingWatch.Config.forTestDrive())
+        val events = run(w, rec)
+        assertTrue(events.map { it.type }.toString(), events.none { it.type == DrivingEventType.WEAVING })
+        assertFalse(w.clearlyErratic(rec.t.last()))
     }
 
     @Test

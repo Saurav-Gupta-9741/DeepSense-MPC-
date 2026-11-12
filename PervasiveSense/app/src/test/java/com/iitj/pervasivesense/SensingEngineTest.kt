@@ -100,6 +100,25 @@ class SensingEngineTest {
         override fun onSnapshot(snapshot: SensingSnapshot) { snapshots += snapshot }
         override fun onTransition(event: TransitionEvent) { transitions += event }
         override fun onEcoModeChanged(eco: Boolean) { ecoChanges += eco }
+        val fit = ArrayList<FitToDriveEvent>()
+        override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) { fit += event }
+    }
+
+    @Test
+    fun aTestDriveWorksFromRawJitteredSensorEvents() {
+        // The whole pipeline (device events, resampling, engine, fit-to-drive), no vehicle detected.
+        val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
+        e.setFitToDriveEnabled(true)
+        e.setScreenOn(false)
+        play(e, Recording.constant(10.0, 0f, 0f, 9.81f, noise = 0.05f))
+        e.startTestDrive()
+        assertTrue(r.snapshots.last().fitToDrive.testDriveSecondsLeft in 299..300)
+        play(e, chairTurning(45.0, seed = 190), at = start + 10_000_000_000L)
+        val asked = r.fit.filterIsInstance<FitToDriveEvent.ErraticDriving>()
+        assertEquals(1, asked.size)
+        assertTrue(asked.single().test)
+        assertTrue(r.fit.filterIsInstance<FitToDriveEvent.TestDriveCoach>().any { it.tip == TestDriveTip.SCORE })
+        assertTrue(r.snapshots.none { it.context == "IN_VEHICLE" }) // never shown as a real trip
     }
 
     private val start = 1_000_000_000L

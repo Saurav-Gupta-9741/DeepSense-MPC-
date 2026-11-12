@@ -726,6 +726,36 @@ class FitToDriveMonitorTest {
         assertEquals(0, m.report().testDriveSecondsLeft)
     }
 
+    private fun tips() = events.filterIsInstance<FitToDriveEvent.TestDriveCoach>()
+
+    @Test
+    fun theTestDriveCoachesThePersonAndCountsTheScore() {
+        val m = monitor()
+        var t = start
+        m.startTestDrive(t)
+        t = feed(m, sitting, t, walking = false)
+        assertTrue(tips().isEmpty()) // sitting still: nothing said
+        t = feed(m, chairTurning(45.0, seed = 180), t, walking = false)
+        assertEquals(TestDriveTip.TURNING_FELT, tips().first().tip)
+        val scores = tips().filter { it.tip == TestDriveTip.SCORE }.map { it.points }
+        assertTrue(scores.toString(), scores.isNotEmpty() && scores == scores.sorted() && scores.all { it in 1..5 })
+        assertTrue(tips().none { it.tip == TestDriveTip.TURN_BACK })
+        assertTrue(erratic().single().test)
+        assertEquals(6, m.report(t).testDrivePoints)
+        assertEquals(6, m.report(t).testDrivePointsNeeded)
+    }
+
+    @Test
+    fun spinningRoundOneWayInATestDriveIsToldToTurnBack() {
+        val m = monitor()
+        var t = start
+        m.startTestDrive(t)
+        t = feed(m, sitting, t, walking = false)
+        feed(m, chairSpinning(30.0), t, walking = false)
+        assertTrue(tips().map { it.tip }.toString(), tips().any { it.tip == TestDriveTip.TURN_BACK })
+        assertTrue(erratic().isEmpty())
+    }
+
     @Test
     fun sittingStillInATestDriveIsNotAskedAboutAndNothingIsWatchedAfterIt() {
         val m = monitor()

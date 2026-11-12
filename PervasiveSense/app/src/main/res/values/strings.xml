@@ -303,10 +303,13 @@
     <string name="fit_keep_settings">App settings</string>
     <string name="fit_test_drive">Test drive (no car)</string>
     <string name="fit_test_drive_stop">Stop test drive (%1$s left)</string>
-    <string name="fit_test_drive_banner">Test drive, %1$s left: phone in your pocket, screen locked. On a swivel chair, turn left and right every 2 s for about a minute.</string>
+    <string name="fit_test_drive_banner">Test drive, %1$s left · score %2$d of %3$d. Phone in your pocket. On a swivel chair turn left, then right, then left (like steering), about once a second. Don’t spin all the way round.</string>
     <string name="fit_test_drive_tag">"TEST · "</string>
-    <string name="fit_card_test_drive">🧪 Test drive: %1$s left</string>
-    <string name="fit_say_test_drive_start">Test drive for five minutes. Lock the screen and put the phone in your pocket. Sit on a swivel chair and turn left and right every two seconds, for about a minute. Sitting still should not set it off.</string>
+    <string name="fit_card_test_drive">🧪 Test drive: %1$s left · score %2$d of %3$d</string>
+    <string name="fit_say_test_drive_start">Test drive for five minutes. Put the phone in your pocket. Sit on a swivel chair and turn it left, then right, then left, like steering, about once a second. Do not spin all the way round. You will hear the score. At six, the phone asks if you are OK.</string>
+    <string name="fit_say_test_drive_felt">I can feel the turning. Keep going: left, then right.</string>
+    <string name="fit_say_test_drive_turn_back">You are turning round one way. Turn back the other way: left, then right.</string>
+    <string name="fit_say_test_drive_score">Score %1$d of %2$d.</string>
     <string name="fit_say_test_drive_stopped">Test drive stopped.</string>
     <string name="fit_say_test_drive_done_asked">Test drive finished. Unsteady driving was noticed.</string>
     <string name="fit_say_test_drive_done_quiet">Test drive finished. No unsteady driving was noticed.</string>

@@ -94,9 +94,12 @@ class DrivingWatch(val config: Config = Config()) {
         companion object {
             /**
              * "Test drive (no car)": turning on a swivel chair is the body turning with no sideways
-             * acceleration, which a real drive ignores. So the test judges the turn rate alone.
+             * acceleration, which a real drive ignores, and pushing the chair round with the legs (or
+             * holding the phone) jolts the phone like a hand would. So the test judges the turn rate
+             * alone and never stops judging because the phone moved.
              */
-            fun forTestDrive() = Config(jerkMinLateralMs2 = 0f, bodyTurnRadS = Float.MAX_VALUE)
+            fun forTestDrive() = Config(jerkMinLateralMs2 = 0f, bodyTurnRadS = Float.MAX_VALUE,
+                handlingRadS = Float.MAX_VALUE, handlingTiltDeg = 181f)
         }
     }
 
@@ -161,6 +164,10 @@ class DrivingWatch(val config: Config = Config()) {
     private var inHand = false
     private var restingSince = Long.MIN_VALUE
 
+    /** The turn rate just now (rad/s, band-passed): for the test drive's spoken coaching. */
+    var turnRate = 0f
+        private set
+
     /** The phone is in the hand or was just moved by hand: the car's motion cannot be read from it. */
     var handledNow = false
         private set
@@ -176,10 +183,13 @@ class DrivingWatch(val config: Config = Config()) {
      * The higher bar for a trip with no fit-to-drive warning (any trip of a sober driver could
      * reach the lower one, e.g. three hard stops in traffic): see the class description.
      */
-    fun clearlyErratic(t: Long): Boolean {
+    fun clearlyErratic(t: Long): Boolean = points(t) >= config.unwarnedPoints
+
+    /** Points of the last [Config.eventsWindowSec]: a weaving episode 2, a jerky or harsh event 1. */
+    fun points(t: Long): Int {
         prune(t)
         val weaving = events.count { it.type == DrivingEventType.WEAVING }
-        return 2 * weaving + (events.size - weaving) >= config.unwarnedPoints
+        return 2 * weaving + (events.size - weaving)
     }
 
     /** Events of the last [Config.eventsWindowSec], oldest first. */
@@ -205,7 +215,7 @@ class DrivingWatch(val config: Config = Config()) {
      */
     fun processSample(t: Long, s: FloatArray, hasGyro: Boolean, screenOn: Boolean = false): DrivingEvent? {
         handledNow = handled(t, s, hasGyro, screenOn)
-        if (handledNow) { reset(); fwdEvidence = 0; return null } // moved: a fresh start (and a new forward axis) once it settles
+        if (handledNow) { reset(); fwdEvidence = 0; turnRate = 0f; return null } // moved: a fresh start (and a new forward axis) once it settles
         if (!started) {
             g[0] = s[0]; g[1] = s[1]; g[2] = s[2]
             mean[0] = s[0]; mean[1] = s[1]; mean[2] = s[2]
@@ -247,6 +257,7 @@ class DrivingWatch(val config: Config = Config()) {
             yawSlow += aSlow * (yaw - yawSlow)
             yawFast += aFast * (yaw - yawFast)
             val y = yawFast - yawSlow
+            turnRate = y
             jerkBuf[jerkI] = yawFast
             jerkI = (jerkI + 1) % jerkBuf.size
             if (jerkN < jerkBuf.size) jerkN++

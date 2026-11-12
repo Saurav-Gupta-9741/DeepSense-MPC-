@@ -131,8 +131,21 @@ data class FitToDriveReport(
     val lastBalance: BalanceResult?,
     val advice: FitAdvice,
     /** "Test drive (no car)" running: seconds left (0: not running). */
-    val testDriveSecondsLeft: Int = 0
+    val testDriveSecondsLeft: Int = 0,
+    /** ...its score so far, and the score that asks "Are you OK?". */
+    val testDrivePoints: Int = 0,
+    val testDrivePointsNeeded: Int = 0
 )
+
+/** Spoken coaching during a "Test drive (no car)". */
+enum class TestDriveTip {
+    /** The first real turn was felt: keep going, left then right. */
+    TURNING_FELT,
+    /** Turning round one way for 4 s (spinning, or a roundabout): weaving is left, then right. */
+    TURN_BACK,
+    /** The score went up (points of the unwarned bar). */
+    SCORE
+}
 
 sealed interface FitToDriveEvent {
     class WalkChecked(val check: WalkCheck, val advice: FitAdvice) : FitToDriveEvent
@@ -158,6 +171,8 @@ sealed interface FitToDriveEvent {
                          val test: Boolean = false) : FitToDriveEvent
     /** A "Test drive (no car)" ran out; [asked]: unsteady driving was noticed during it. */
     class TestDriveEnded(val asked: Boolean) : FitToDriveEvent
+    /** "Test drive (no car)": spoken coaching (the phone is in a pocket). [points]: the score for [TestDriveTip.SCORE]. */
+    class TestDriveCoach(val tip: TestDriveTip, val points: Int = 0, val needed: Int = 0) : FitToDriveEvent
     /** Every analysed walking segment, with its distance from normal (NaN while learning): study log. */
     class SegmentMeasured(val segment: GaitSegment, val distance: Float) : FitToDriveEvent
     /** Check my walk: too little walking recorded in its 30 s, it goes on until there is enough (spoken: keep walking). */
@@ -332,6 +347,12 @@ class FitToDriveMonitor(
      */
     private var testDriveUntil = Long.MIN_VALUE
     private var testDriveAsked = false
+    // Test drive coaching.
+    private var testFelt = false
+    private var testSpinSign = 0
+    private var testSpinSince = Long.MIN_VALUE
+    private var testTurnBackT = Long.MIN_VALUE
+    private var testPoints = 0
     private var inVehicleNow = false
     private var walkSessionStart = Long.MIN_VALUE
     /** The current advice came from a "Test it" practice test: it never reminds or alerts anyone. */
@@ -365,7 +386,11 @@ class FitToDriveMonitor(
     private var inPocketNow = true
 
     private val segmentSeconds get() = extractor.hopSamples / 50f
-    private companion object { const val ISSUE_STABLE_SEC = 3f }
+    private companion object {
+        const val ISSUE_STABLE_SEC = 3f
+        /** Test drive: a turn this fast is felt (a swivel chair turned by hand reaches 0.5-2 rad/s). */
+        const val TEST_TURN_RAD_S = 0.3f
+    }
     private val warningActive get() = advice == FitAdvice.TAKE_BALANCE_CHECK || advice == FitAdvice.DONT_DRIVE
     /** Possibly impaired right now: do not learn "normal" from it. */
     private val learningBlocked get() =
@@ -560,6 +585,7 @@ class FitToDriveMonitor(
         if (!enabled) return false
         testDriveUntil = t + secs(config.testDriveSec)
         testDriveAsked = false
+        testFelt = false; testSpinSign = 0; testSpinSince = Long.MIN_VALUE; testTurnBackT = Long.MIN_VALUE; testPoints = 0
         passengerConfirmed = false
         driverOkUntil = Long.MIN_VALUE
         lastErraticT = Long.MIN_VALUE
@@ -825,8 +851,38 @@ class FitToDriveMonitor(
         lastBalance = lastBalance,
         advice = advice,
         testDriveSecondsLeft = if (testDriveUntil == Long.MIN_VALUE || t >= testDriveUntil) 0
-            else kotlin.math.ceil((testDriveUntil - t) / 1e9).toInt()
+            else kotlin.math.ceil((testDriveUntil - t) / 1e9).toInt(),
+        testDrivePoints = if (testDriveUntil == Long.MIN_VALUE) 0 else testPoints,
+        testDrivePointsNeeded = testDriveWatch.config.unwarnedPoints
     )
+
+    /**
+     * Test drive: say what the phone feels, since the person cannot see the screen. The first turn;
+     * "turn back the other way" when it turns round one way for 4 s (weaving is left, then right);
+     * and the score each time it goes up.
+     */
+    private fun coachTestDrive(t: Long) {
+        val y = testDriveWatch.turnRate
+        val sign = if (y >= TEST_TURN_RAD_S) 1 else if (y <= -TEST_TURN_RAD_S) -1 else 0
+        if (sign != 0 && !testFelt) {
+            testFelt = true
+            onEvent(FitToDriveEvent.TestDriveCoach(TestDriveTip.TURNING_FELT))
+        }
+        when {
+            sign == 0 -> testSpinSign = 0
+            sign != testSpinSign -> { testSpinSign = sign; testSpinSince = t }
+            t - testSpinSince >= secs(4f) && (testTurnBackT == Long.MIN_VALUE || t - testTurnBackT >= secs(10f)) -> {
+                testTurnBackT = t
+                onEvent(FitToDriveEvent.TestDriveCoach(TestDriveTip.TURN_BACK))
+            }
+        }
+        val needed = testDriveWatch.config.unwarnedPoints
+        val p = minOf(testDriveWatch.points(t), needed)
+        if (p > testPoints) {
+            testPoints = p
+            if (p < needed) onEvent(FitToDriveEvent.TestDriveCoach(TestDriveTip.SCORE, p, needed))
+        }
+    }
 
     // ------------------------------------------------------------------ internals
     private fun secs(s: Float) = (s * 1e9f).toLong()
@@ -864,8 +920,9 @@ class FitToDriveMonitor(
             return
         }
         inVehicleNow = true
-        val e = watch.processSample(t, s, hasGyro, screenOn) ?: return
-        if (passengerConfirmed) return
+        val e = watch.processSample(t, s, hasGyro, screenOn)
+        if (test) coachTestDrive(t)
+        if (e == null || passengerConfirmed) return
         val warned = drivingArmed(t)
         val erratic = if (warned) watch.erratic(t)
             else (watchEveryTrip || test) && (driverOkUntil == Long.MIN_VALUE || t >= driverOkUntil) && watch.clearlyErratic(t)

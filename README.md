@@ -32,7 +32,7 @@ screen locked.
 | Model | 82.8 KB dynamic-range INT8, 0.3 ms per inference (desktop CPU), 99.95 % argmax agreement with float |
 | Step counting on real walking / jogging / stairs (vs an independent gyroscope reference) | within 1 – 5 % |
 | Fit-to-drive, 24 people: sober held-out walk / simulated strong / mild impairment | large gap **1/24** / **24/24** / 18/24 (mild flagged 23/24) |
-| Automated tests | 150 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
+| Automated tests | 156 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
 
 ---
 
@@ -169,7 +169,7 @@ The TensorFlow version must match `org.tensorflow:tensorflow-lite` in `app/build
 
 See [`docs/TESTING.md`](docs/TESTING.md) for what each test proves.
 
-**1. Engine: 150 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
+**1. Engine: 156 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
 real Kotlin code, mostly by replaying real MotionSense recordings delivered like
 a phone does: separate accel/gyro streams at 57.3 / 48.7 Hz with ±2 ms jitter.
 ```bash
@@ -236,7 +236,7 @@ The full feature-by-feature checklist is in
 PervasiveSense/                 Android app (Kotlin, minSdk 26, targetSdk 34)
   app/src/main/java/...          sources (table above)
   app/src/main/assets/           deepsense_int8.tflite, deepsense_labels.txt
-  app/src/test/                  150 JVM tests + real-data fixtures (MotionSense excerpts)
+  app/src/test/                  156 JVM tests + real-data fixtures (MotionSense excerpts)
 model/
   har_datasets.py                dataset loaders -> Android units, frame verification
   train_export_deepsense.py      training + TF 2.16.1 export + evaluation

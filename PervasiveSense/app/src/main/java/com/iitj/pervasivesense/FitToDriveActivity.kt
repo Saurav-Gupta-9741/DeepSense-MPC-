@@ -608,7 +608,8 @@ class FitToDriveActivity : AppCompatActivity() {
             !running -> getString(R.string.hero_starting) to R.color.text_muted
             !enabled -> getString(R.string.fit_disabled_hint) to R.color.text_muted
             f == null || f.balanceRunning -> null to 0
-            f.testDriveSecondsLeft > 0 -> getString(R.string.fit_test_drive_banner, clock(f.testDriveSecondsLeft.toFloat())) to R.color.primary_glow
+            f.testDriveSecondsLeft > 0 -> getString(R.string.fit_test_drive_banner, clock(f.testDriveSecondsLeft.toFloat()),
+                f.testDrivePoints, f.testDrivePointsNeeded) to R.color.primary_glow
             f.learningPaused -> getString(R.string.fit_study_paused) to R.color.accent_amber
             f.watchingDriving || (f.recentlyWarned && f.advice == FitAdvice.NONE) ->
                 getString(R.string.fit_watching_driving) to R.color.accent_amber

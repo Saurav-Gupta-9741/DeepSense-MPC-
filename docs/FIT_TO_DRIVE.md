@@ -460,3 +460,24 @@ state's colour. No button is offered while in a vehicle.
 - **Limit:** the phone **held in the hand** while driving cannot be judged (the hand moves it more
   than the car); it is judged again as soon as it is put down or away.
 - **Tests (7 new, 150 JVM tests).**
+
+## v3.9: the test drive works the way people actually try it
+
+On the phone, turning a swivel chair did nothing. Two reasons, both reproduced in tests:
+
+- **The legs pushing the chair** jolt a phone in the trouser pocket as fast as a hand would
+  (3 rad/s). The test drive kept the hand check of a real drive, so every push wiped the turning
+  seen so far (the control test still shows this with the old settings). The test drive now never
+  stops judging because the phone moved, so it also works with the phone held in the hand.
+- **Spinning round and round one way** is a roundabout, not weaving; weaving is left, then right.
+  The test drive now coaches out loud, since the phone is in a pocket:
+  - "I can feel the turning. Keep going: left, then right." at the first turn;
+  - "You are turning round one way. Turn back the other way." after 4 s of spinning one way;
+  - "Score 2 of 6", "Score 4 of 6"... each time the score goes up; at 6 it asks "Are you OK?".
+  The score also shows on the dashboard card and the Fit to drive screen.
+
+Tests (6 new, 156 JVM tests): realistic chair turning (random 15-60 degree swings over 0.6-1.5 s,
+legs pushing at every reversal), five attempts each with the phone in a trouser pocket, a shirt
+pocket and held in the hand with the screen on, all reach the score; spinning one way never does
+and is told to turn back; and the whole pipeline from raw, jittered sensor events (resampling,
+engine, fit-to-drive) asks "Are you OK?" exactly once.

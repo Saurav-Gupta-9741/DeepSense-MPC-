@@ -453,6 +453,11 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                     speak(getString(R.string.fit_say_erratic))
                 }
             }
+            is FitToDriveEvent.TestDriveCoach -> speak(when (event.tip) {
+                TestDriveTip.TURNING_FELT -> getString(R.string.fit_say_test_drive_felt)
+                TestDriveTip.TURN_BACK -> getString(R.string.fit_say_test_drive_turn_back)
+                TestDriveTip.SCORE -> getString(R.string.fit_say_test_drive_score, event.points, event.needed)
+            }, interrupt = false)
             is FitToDriveEvent.TestDriveEnded -> speak(getString(
                 if (event.asked) R.string.fit_say_test_drive_done_asked else R.string.fit_say_test_drive_done_quiet), interrupt = false)
             is FitToDriveEvent.BalanceDone -> {
