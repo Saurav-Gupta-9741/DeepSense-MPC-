@@ -146,8 +146,12 @@ sealed interface FitToDriveEvent {
     class WalkSession(val stage: WalkSessionStage) : FitToDriveEvent
     /** Set-up walk / Check my walk: recording stopped or started again, and why (spoken). */
     class RecordingIssueChanged(val issue: RecordingIssue) : FitToDriveEvent
-    /** In a vehicle after a warning, the driving looks erratic (weaving, jerky steering, harsh braking). */
-    class ErraticDriving(val events: List<DrivingEvent>) : FitToDriveEvent
+    /**
+     * In a vehicle, the driving looks erratic (weaving, jerky steering, harsh braking). [warned]: after a
+     * warning or an unusual walk (the lower bar: the contact alert counts down at once). Otherwise every
+     * trip is watched with a higher bar ([FitToDriveMonitor.watchEveryTrip]) and the driver is asked first.
+     */
+    class ErraticDriving(val events: List<DrivingEvent>, val warned: Boolean = true) : FitToDriveEvent
     /** Every analysed walking segment, with its distance from normal (NaN while learning): study log. */
     class SegmentMeasured(val segment: GaitSegment, val distance: Float) : FitToDriveEvent
     /** Check my walk: too little walking recorded in its 30 s, it goes on until there is enough (spoken: keep walking). */
@@ -231,6 +235,8 @@ class FitToDriveMonitor(
         val watchAfterWarningSec: Float = 3600f,
         val reminderCooldownSec: Float = 600f,
         val erraticCooldownSec: Float = 600f,
+        /** "I'm OK" (asked after unsteady driving with no warning): not asked again on this trip for this long. */
+        val driverOkSec: Float = 900f,
         /** The guided set-up walk gives up after this long. */
         /** The set-up walk ends by itself once enough walking is recorded; it gives up after this long. */
         val walkSessionSec: Float = 300f,
@@ -302,6 +308,14 @@ class FitToDriveMonitor(
     private var lastReminderT = Long.MIN_VALUE
     private var lastErraticT = Long.MIN_VALUE
     private var passengerConfirmed = false
+    /** "I'm OK" after being asked: the unwarned watch rests until then (this trip). */
+    private var driverOkUntil = Long.MIN_VALUE
+    /**
+     * Watch every trip, not only after a warning: someone who never checks the walk (or whose walk to
+     * the car was not measured) and drives unsteadily is still noticed. Set while the contact alert is
+     * on (the user opted in to a safety net); the bar is higher and the driver is asked first.
+     */
+    var watchEveryTrip = false
     private var inVehicleNow = false
     private var walkSessionStart = Long.MIN_VALUE
     /** The current advice came from a "Test it" practice test: it never reminds or alerts anyone. */
@@ -501,6 +515,7 @@ class FitToDriveMonitor(
     /** The vehicle context just started (Activity Recognition IN_VEHICLE). */
     fun onTripStart(t: Long) {
         passengerConfirmed = false
+        driverOkUntil = Long.MIN_VALUE
         drivingWatch.clear()
         if (!enabled) return
         beforeDrive(t, CheckTrigger.TRIP_START)
@@ -509,6 +524,12 @@ class FitToDriveMonitor(
 
     /** "I'm a passenger" (e.g. cancelling a contact alert): stop watching the driving on this trip. */
     fun confirmPassenger() { passengerConfirmed = true }
+
+    /**
+     * "I'm OK", asked after unsteady driving with no warning: not asked again for [Config.driverOkSec]
+     * on this trip. A warning's lower bar is not affected (the walk already said otherwise).
+     */
+    fun driverOk(t: Long) { driverOkUntil = t + secs(config.driverOkSec) }
 
     /** A car audio / hands-free Bluetooth device connected: usually before the car moves. */
     fun onCarBluetooth(t: Long) {
@@ -785,7 +806,11 @@ class FitToDriveMonitor(
         evaluate(t, trigger)
     }
 
-    /** In a vehicle: track the driving; after a warning, report erratic driving (at most every 10 min). */
+    /**
+     * In a vehicle: track the driving and report erratic driving (at most every 10 min). After a
+     * warning or an unusual walk: the lower bar. Otherwise, with [watchEveryTrip]: the higher bar
+     * (the driver is asked first), unless the driver said "I'm OK" or "I'm a passenger".
+     */
     private fun watchDriving(t: Long, s: FloatArray, hasGyro: Boolean, inVehicle: Boolean, screenOn: Boolean) {
         if (!inVehicle) {
             if (inVehicleNow) drivingWatch.reset() // a stop within the trip: keep the events seen so far
@@ -794,10 +819,14 @@ class FitToDriveMonitor(
         }
         inVehicleNow = true
         val e = drivingWatch.processSample(t, s, hasGyro, screenOn) ?: return
-        if (!drivingArmed(t) || !drivingWatch.erratic(t)) return
+        if (passengerConfirmed) return
+        val warned = drivingArmed(t)
+        val erratic = if (warned) drivingWatch.erratic(t)
+            else watchEveryTrip && (driverOkUntil == Long.MIN_VALUE || t >= driverOkUntil) && drivingWatch.clearlyErratic(t)
+        if (!erratic) return
         if (lastErraticT != Long.MIN_VALUE && t - lastErraticT < secs(config.erraticCooldownSec)) return
         lastErraticT = t
-        onEvent(FitToDriveEvent.ErraticDriving(drivingWatch.recentEvents(e.tNanos)))
+        onEvent(FitToDriveEvent.ErraticDriving(drivingWatch.recentEvents(e.tNanos), warned))
     }
 
     /**

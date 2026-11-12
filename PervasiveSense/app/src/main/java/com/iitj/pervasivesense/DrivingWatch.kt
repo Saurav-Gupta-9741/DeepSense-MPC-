@@ -28,7 +28,11 @@ class DrivingEvent(val tNanos: Long, val type: DrivingEventType, val magnitude: 
  *    the usual "harsh event" level): hard braking, hard acceleration or swerving.
  *
  * [erratic]: a weaving episode, or [Config.eventsForErratic] jerky/harsh events
- * within [Config.eventsWindowSec].
+ * within [Config.eventsWindowSec] (used after a fit-to-drive warning).
+ * [clearlyErratic]: the higher bar for every other trip, where nothing else
+ * suggests impairment: [Config.unwarnedPoints] points, a weaving episode counting
+ * 2 and a jerky/harsh event 1 (three weaving episodes, about a minute of steady
+ * weaving; or weaving plus hard brakes or jerks; or six of those).
  *
  * The phone moved by hand (picked up, put down, used while driving) moves on its own,
  * so nothing is judged then ([handled]): a hand tilts the phone fast or far, a car only
@@ -36,9 +40,10 @@ class DrivingEvent(val tNanos: Long, val type: DrivingEventType, val magnitude: 
  * until the screen goes off or it rests still (put in a holder) for [Config.restingSec].
  *
  * Limits: weaving inside one lane at highway speed turns the car too little to
- * be seen; a phone in a trouser pocket also moves with the driver's leg. It
- * therefore only acts after a fit-to-drive warning, and an alert always has a
- * cancel countdown. Pure Kotlin, 50 Hz samples [ax, ay, az, gx, gy, gz].
+ * be seen; a phone in a trouser pocket also moves with the driver's leg; a very
+ * twisty road (a curve every few seconds for minutes) can look like weaving. So
+ * without a warning the driver is asked first ("Are you OK?"), and an alert always
+ * has a cancel countdown. Pure Kotlin, 50 Hz samples [ax, ay, az, gx, gy, gz].
  */
 class DrivingWatch(val config: Config = Config()) {
     data class Config(
@@ -49,6 +54,12 @@ class DrivingWatch(val config: Config = Config()) {
         val harshMs2: Float = 4f,
         val eventsForErratic: Int = 3,
         val eventsWindowSec: Float = 300f,
+        /**
+         * Without a warning, points needed within [eventsWindowSec]: a weaving episode counts 2,
+         * a jerky or harsh event 1 (about a minute of steady weaving, or weaving plus several
+         * hard brakes or jerks, or six of those).
+         */
+        val unwarnedPoints: Int = 6,
         val cooldownSec: Float = 3f,
         /** The phone tilting this fast (rad/s, 0.25 s mean) is a hand moving it: a car pitches and rolls far slower. */
         val handlingRadS: Float = 1.5f,
@@ -112,6 +123,16 @@ class DrivingWatch(val config: Config = Config()) {
         prune(t)
         return events.any { it.type == DrivingEventType.WEAVING } ||
             events.count { it.type != DrivingEventType.WEAVING } >= config.eventsForErratic
+    }
+
+    /**
+     * The higher bar for a trip with no fit-to-drive warning (any trip of a sober driver could
+     * reach the lower one, e.g. three hard stops in traffic): see the class description.
+     */
+    fun clearlyErratic(t: Long): Boolean {
+        prune(t)
+        val weaving = events.count { it.type == DrivingEventType.WEAVING }
+        return 2 * weaving + (events.size - weaving) >= config.unwarnedPoints
     }
 
     /** Events of the last [Config.eventsWindowSec], oldest first. */

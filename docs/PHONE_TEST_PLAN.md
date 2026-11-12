@@ -119,6 +119,9 @@ Extra checks (optional):
 | I12 | After a real *Check my walk* large gap (walk unsteadily without *Test it*), tap *I'm not driving*, then ride as a **passenger** | Banner *…trips and driving are being watched*; when the trip is detected: reminder *You said you weren't driving…* |
 | I13 | Same, with the car's Bluetooth connecting (passenger, engine off) | A 30 s spoken countdown *Texting … in 30 s*; tap **Cancel – I'm a passenger**: nothing is sent |
 | I14 | Turn the switch off | The dashboard card shows *Off* |
+| I15 | With the alert on, open *Settings ▸* and look under *Send a test alert* | *Keeps running when the app is closed* and *Alert opens over the lock screen* both say ✓ (otherwise tap **Fix**) |
+| I16 | **Passenger only**, no walk check: in a car holder, screen locked, the driver makes slow S-curves in an empty lot for about 1 min | The screen turns on with **Are you OK?**, a 60 s countdown and **I'm OK** / **I'm a passenger**; the question is spoken again at 30 s and 10 s. **I'm OK** stops it. Unanswered: text, then call |
+| I17 | Swipe PervasiveSense away from the recent apps, wait 1 min | The PervasiveSense notification is still there (or comes back within seconds) |
 
 ---|---|---|
 | I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the *Set up (0 of 3 done)* card appears |
@@ -140,5 +143,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 137 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 143 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

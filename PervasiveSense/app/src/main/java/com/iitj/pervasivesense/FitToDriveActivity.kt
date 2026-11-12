@@ -154,6 +154,8 @@ class FitToDriveActivity : AppCompatActivity() {
             true
         }
         binding.btnAlertCancel.setOnClickListener { SensingRepository.cancelContactAlert() }
+        binding.btnAlertOk.setOnClickListener { SensingRepository.driverOk() }
+        binding.btnKeepRunning.setOnClickListener { fixKeepRunning() }
         binding.btnStep1.setOnClickListener {
             if (lastReport?.walkSession == true) stopRecording() else recordWalk(CarryPosition.POCKET)
         }
@@ -241,6 +243,11 @@ class FitToDriveActivity : AppCompatActivity() {
         SensingRepository.setUiVisible(true)
     }
 
+    override fun onResume() {
+        super.onResume()
+        renderKeepRunning() // back from the battery or lock-screen settings
+    }
+
     override fun onStop() {
         SensingRepository.setUiVisible(false)
         super.onStop()
@@ -321,8 +328,41 @@ class FitToDriveActivity : AppCompatActivity() {
         bindingUi = false
         binding.btnTestAlert.visibility = if (on) View.VISIBLE else View.GONE
         binding.rowAlertCall.visibility = binding.btnTestAlert.visibility
+        renderKeepRunning()
         if (on) askToRunInBackground()
         SensingRepository.refreshFitSettings()
+    }
+
+    /**
+     * With the contact alert on: can the watch keep running when the app is closed (no battery
+     * restriction), and can the alert open over the lock screen? One button fixes what is missing.
+     */
+    private fun renderKeepRunning() = with(binding) {
+        rowKeepRunning.visibility = btnTestAlert.visibility
+        if (rowKeepRunning.visibility != View.VISIBLE) return@with
+        val ctx = this@FitToDriveActivity
+        val battery = getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
+        val lock = ContactAlert.canUseFullScreen(ctx)
+        fun mark(ok: Boolean) = getString(if (ok) R.string.fit_keep_ok else R.string.fit_keep_missing)
+        var text = getString(R.string.fit_keep_status, mark(battery), mark(lock))
+        if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) text += "\n" + getString(R.string.fit_keep_samsung)
+        tvKeepRunning.text = text
+        btnKeepRunning.setText(if (battery && lock) R.string.fit_keep_settings else R.string.fit_keep_fix)
+    }
+
+    @SuppressLint("BatteryLife") // a safety alert must run in the background; not a Play Store app
+    private fun fixKeepRunning() {
+        val pm = getSystemService(PowerManager::class.java)
+        when {
+            pm != null && !pm.isIgnoringBatteryOptimizations(packageName) -> {
+                Toast.makeText(this, R.string.fit_battery_hint, Toast.LENGTH_LONG).show()
+                launch(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+            }
+            Build.VERSION.SDK_INT >= 34 && !ContactAlert.canUseFullScreen(this) ->
+                launch(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+            // Both fine: the app's own settings (Samsung: Battery > Unrestricted).
+            else -> launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
     }
 
     private fun setAlertCall(on: Boolean) {
@@ -574,12 +614,11 @@ class FitToDriveActivity : AppCompatActivity() {
     private fun renderAlert(a: AlertCountdown?) = with(binding) {
         cardAlert.visibility = if (a != null) View.VISIBLE else View.GONE
         if (a == null) return@with
-        tvAlertTitle.text = getString(R.string.fit_alert_title, a.contactName, a.secondsLeft)
-        tvAlertDetail.setText(when (a.kind) {
-            AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_alert_detail_driving
-            AlertKind.ERRATIC_DRIVING -> R.string.fit_alert_detail_erratic
-            AlertKind.TEST -> R.string.fit_alert_detail_test
-        })
+        val asking = a.kind == AlertKind.UNSTEADY_DRIVING
+        tvAlertTitle.text = getString(if (asking) R.string.fit_alert_ask_card_title else R.string.fit_alert_title,
+            a.contactName, a.secondsLeft)
+        tvAlertDetail.text = ContactAlert.detailText(this@FitToDriveActivity, a.kind, a.contactName)
+        btnAlertOk.visibility = if (asking) View.VISIBLE else View.GONE
         btnAlertCancel.setText(if (a.kind == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel)
     }
 

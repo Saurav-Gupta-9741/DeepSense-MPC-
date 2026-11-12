@@ -142,6 +142,18 @@
                         android:textSize="14sp" />
 
                     <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnAlertOk"
+                        android:layout_width="match_parent"
+                        android:layout_height="64dp"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/fit_alert_ok"
+                        android:textColor="@color/bg_dark"
+                        android:textSize="16sp"
+                        android:visibility="gone"
+                        app:backgroundTint="@color/accent_emerald"
+                        app:cornerRadius="12dp" />
+
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnAlertCancel"
                         android:layout_width="match_parent"
                         android:layout_height="64dp"
@@ -965,6 +977,32 @@
                         android:textColor="@color/text_main"
                         android:visibility="gone"
                         app:cornerRadius="12dp" />
+
+                    <!-- Can the watch keep running (battery) and the alert open over the lock screen? -->
+                    <LinearLayout
+                        android:id="@+id/rowKeepRunning"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tvKeepRunning"
+                            style="@style/PS.Caption"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnKeepRunning"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/fit_keep_fix"
+                            android:textColor="@color/primary_glow" />
+                    </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRecordAgain"

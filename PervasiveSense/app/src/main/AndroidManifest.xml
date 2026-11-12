@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Asks to be left out of battery optimisation, so the watch keeps running with the screen locked. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- An alert countdown ("Are you OK?") opens over the lock screen, so the driver can answer without unlocking. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Optional: lists the SIMs so the contact alert can try another one (dual SIM). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -70,6 +72,15 @@
             android:parentActivityName=".MainActivity"
             android:theme="@style/Theme.PervasiveSense" />
 
+        <!-- A contact alert counting down, over the lock screen (from the alert's full-screen notification). -->
+        <activity
+            android:name=".AlertActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.iitj.pervasivesense.alert"
+            android:theme="@style/Theme.PervasiveSense" />
+
         <service
             android:name=".SensingForegroundService"
             android:enabled="true"
@@ -90,6 +101,11 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- Restarts sensing if the phone stopped it (every 15 min, and after the app is swiped away). -->
+        <receiver
+            android:name=".WatchdogReceiver"
+            android:exported="false" />
 
     </application>
 

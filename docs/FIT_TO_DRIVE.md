@@ -273,7 +273,9 @@ Safety: a spotter walks alongside, sessions use a flat, closed route, and nobody
 | `BalanceTest.kt` | 30 s standing-sway measurement |
 | `FitToDriveMonitor.kt` | Learning, quarantine, triggers, scoring, balance decision, advice, the 1-hour watch after a warning |
 | `DrivingWatch.kt` | Weaving, jerky steering and harsh braking from an unmounted phone |
-| `ContactAlert.kt` | Opt-in text to the trusted contact: countdown, cancel, location, SMS |
+| `ContactAlert.kt` | Opt-in alert to the trusted contact: "Are you OK?" or countdown, cancel, location, SMS, call |
+| `AlertActivity.kt` | The alert countdown over the lock screen (I'm OK / I'm a passenger) |
+| `WatchdogReceiver.kt` | Restarts sensing if the phone stopped it (every 15 min, after a swipe) |
 | `FitVoice.kt` | Spoken guidance and results |
 | `FitToDriveStore.kt` | Settings and atomic persistence of learned data |
 | `StudyLog.kt` | Labelled study sessions: CSV log and export |
@@ -389,3 +391,35 @@ screen and voice tell the user to walk that way. A wobbly walk then gets its ful
   service started at boot use the location).
 - **Study mode** (labelled goggle sessions for research) is hidden. Long-press "How it works and
   its limits" to show it; it shows by itself while a session is labelled.
+
+## v3.6: every drive is watched; "Are you OK?" first; the watch restarts itself
+
+- **The user never checks the walk and drives anyway.** Before, weaving, jerky steering and harsh
+  braking were measured on every trip but only reported within an hour of a warning. If the walk to
+  the car was not measured (too short, phone in a bag), nothing was reported. Now, with the contact
+  alert on, every trip is watched with a higher bar: within 5 minutes, 6 points, a weaving episode
+  counting 2 and a jerky or harsh event 1 (about a minute of steady weaving, weaving plus hard
+  brakes or jerks, or six hard brakes or jerks). After a warning the lower bar stays (one weaving
+  episode or three events).
+- **Asked first.** Without a warning, the phone speaks "Your driving looks unsteady. Are you OK?",
+  vibrates, and opens a full-screen alert over the lock screen (no unlocking needed) with **I'm OK**
+  and **I'm a passenger**. The question is spoken again at 30 s and 10 s. No answer within 60 s: the
+  contact gets the text with the location, then the call. **I'm OK** stops the question for 15 minutes
+  on that trip; **I'm a passenger** stops it for the whole trip. After a warning there is no "I'm OK"
+  (someone impaired would also say they are OK): only "I'm a passenger" cancels the 30 s countdown.
+- **Swiped away or stopped by the phone.** A foreground service normally survives being swiped from
+  the recent apps. If the phone's battery saver stops it anyway, a watchdog alarm (every 15 minutes,
+  and 5 s after the app is swiped away) starts it again. If Android refuses (no battery exemption),
+  a notification says "PervasiveSense stopped" and turns it back on with one tap. The Fit to drive
+  settings show whether the app may run when closed and open over the lock screen, with a **Fix**
+  button (and the Samsung "Never sleeping apps" step).
+- **Stop sensing** on the dashboard now really means stopped: before, the restart after a reboot
+  could turn it back on.
+- **Tests (6 new):** a minute of weaving with no warning asks the driver first; a short weave, three
+  hard stops in traffic, ordinary city driving and a hill road with a curve every 7 s are never asked
+  about; six hard brakes are; "I'm OK" rests the question for 15 minutes; a passenger is never asked.
+- **Limits:** "Force stop" in the app settings (or uninstalling) stops everything until the app is
+  opened again: Android allows no way around it. A very twisty road (a curve every 5 s for over a
+  minute) can be asked about; the driver answers "I'm OK". Android 14 opens the alert over the lock
+  screen only if the full-screen permission is allowed (the **Fix** button opens it); otherwise it
+  is a heads-up notification plus the spoken question.

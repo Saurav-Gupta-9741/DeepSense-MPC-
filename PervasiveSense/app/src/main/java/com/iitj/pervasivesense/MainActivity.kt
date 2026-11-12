@@ -30,6 +30,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_ACK_FALL = "com.iitj.pervasivesense.extra.ACK_FALL"
+        /** From the "sensing stopped" notification: start it again (the app is in the foreground now). */
+        const val EXTRA_RESTART = "com.iitj.pervasivesense.extra.RESTART"
         private const val KEY_DIAGNOSTICS = "diagnostics_open"
     }
 
@@ -49,8 +51,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnToggleService.setOnClickListener {
             when (SensingRepository.status.value) {
-                ServiceStatus.RUNNING, ServiceStatus.STARTING ->
-                    stopService(Intent(this, SensingForegroundService::class.java))
+                ServiceStatus.RUNNING, ServiceStatus.STARTING -> SensingForegroundService.stopByUser(this)
                 ServiceStatus.STOPPED -> requestPermissionsThenStart()
             }
         }
@@ -99,6 +100,10 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra(EXTRA_ACK_FALL, false) == true) {
             SensingRepository.acknowledgeFall()
             intent.removeExtra(EXTRA_ACK_FALL)
+        }
+        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
+            intent.removeExtra(EXTRA_RESTART)
+            if (SensingRepository.status.value == ServiceStatus.STOPPED) requestPermissionsThenStart()
         }
     }
 

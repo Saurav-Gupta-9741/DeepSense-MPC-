@@ -632,6 +632,7 @@ class FitToDriveMonitorTest {
         t = feed(m, weavingDrive(90.0), t, walking = false, inVehicle = true)
         val e = erratic().single()
         assertTrue(e.events.any { it.type == DrivingEventType.WEAVING })
+        assertTrue(e.warned) // after a warning: the contact alert counts down at once
         // Next trip, but "I'm a passenger" (cancelled the contact alert): not watched.
         t = feed(m, Recording.constant(5.0, 0f, 0f, 9.81f), t + oneMinute, walking = false)
         m.onTripStart(t)
@@ -641,8 +642,70 @@ class FitToDriveMonitorTest {
         assertEquals(1, erratic().size)
     }
 
+    // ---------------------------------------------------------------- every trip (the contact alert is on)
+
+    /** Calm driving for [seconds], in a vehicle. */
+    private fun calm(m: FitToDriveMonitor, seconds: Double, t: Long, seed: Int = 70) =
+        feed(m, drive(seconds, seed = seed) { 0.0 }, t, walking = false, inVehicle = true)
+
+    @Test
+    fun neverCheckedTheWalkButWeavesForAMinuteTheDriverIsAskedFirst() {
+        // The user ignored the app: no "Check my walk", no warning; got in and drove unsteadily.
+        val m = monitor().apply { watchEveryTrip = true }
+        var t = learnNormal(m)
+        m.onTripStart(t)
+        t = calm(m, 20.0, t)
+        feed(m, weavingDrive(90.0), t, walking = false, inVehicle = true)
+        val e = erratic().single()
+        assertFalse(e.warned) // asked "Are you OK?" first, not a 30 s countdown
+        assertTrue(e.events.count { it.type == DrivingEventType.WEAVING } >= 3)
+        assertTrue(reminders().isEmpty())
+    }
+
+    @Test
+    fun ordinaryDrivingIsNeverAskedAbout() {
+        val m = monitor().apply { watchEveryTrip = true }
+        var t = learnNormal(m)
+        m.onTripStart(t)
+        t = feed(m, cityDrive(seed = 71), t, walking = false, inVehicle = true)
+        // Three hard stops in traffic and a short swerve around a pothole.
+        t = feed(m, drive(200.0, seed = 72, fwd = { ts -> -bump(ts, 40.0, 2.0, 6.5) - bump(ts, 90.0, 2.0, 6.5) - bump(ts, 140.0, 2.0, 6.5) }) { 0.0 },
+            t, walking = false, inVehicle = true)
+        feed(m, Recording.concat(drive(20.0, seed = 73) { 0.0 }, weavingDrive(20.0, seed = 74)), t, walking = false, inVehicle = true)
+        assertTrue(erratic().map { it.events.map { e -> e.type } }.toString(), erratic().isEmpty())
+    }
+
+    @Test
+    fun imOkRestsTheQuestionForFifteenMinutesAndAPassengerIsNeverAsked() {
+        val m = monitor().apply { watchEveryTrip = true }
+        var t = learnNormal(m)
+        m.onTripStart(t)
+        t = calm(m, 20.0, t)
+        t = feed(m, weavingDrive(90.0), t, walking = false, inVehicle = true)
+        assertEquals(1, erratic().size)
+        m.driverOk(t)
+        val okAt = t
+        // 11 minutes later (past the 10-minute repeat limit) the weaving goes on: not asked, the driver said OK.
+        t = calm(m, 570.0, t)
+        t = feed(m, weavingDrive(90.0, seed = 75), t, walking = false, inVehicle = true)
+        assertTrue(t - okAt < 15 * oneMinute)
+        assertEquals(1, erratic().size)
+        // After the 15 minutes: asked again.
+        t = calm(m, 240.0, t)
+        t = feed(m, weavingDrive(90.0, seed = 76), t, walking = false, inVehicle = true)
+        assertEquals(2, erratic().size)
+        // A new trip as a passenger (a bumpy bus, a cab): never asked.
+        t = feed(m, Recording.constant(5.0, 0f, 0f, 9.81f), t + oneMinute, walking = false)
+        m.onTripStart(t)
+        m.confirmPassenger()
+        t = calm(m, 20.0, t)
+        feed(m, weavingDrive(90.0, seed = 77), t, walking = false, inVehicle = true)
+        assertEquals(2, erratic().size)
+    }
+
     @Test
     fun withoutAWarningDrivingIsNeverReported() {
+        // The contact alert is off (watchEveryTrip false): only a warning makes the driving watched.
         val m = monitor()
         var t = learnNormal(m)
         m.onTripStart(t)

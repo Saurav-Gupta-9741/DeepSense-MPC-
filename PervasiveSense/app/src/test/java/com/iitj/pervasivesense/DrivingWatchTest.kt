@@ -273,4 +273,52 @@ class DrivingWatchTest {
         val events = run(w, Recording.concat(drive(20.0) { 0.0 }, weavingDrive()), hasGyro = false)
         assertTrue(events.none { it.type == DrivingEventType.WEAVING || it.type == DrivingEventType.JERKY_STEERING })
     }
+
+    // ---------------------------------------------------------------- the higher bar (no warning)
+
+    @Test
+    fun withoutAWarningAShortWeaveIsNotEnoughButAMinuteOfWeavingIs() {
+        for ((k, r) in rotations.withIndex()) {
+            val short = DrivingWatch()
+            val brief = Recording.concat(drive(20.0, seed = 40 + k) { 0.0 }, weavingDrive(20.0, seed = 44 + k)).rotated(r)
+            val e1 = run(short, brief)
+            assertTrue("rotation $k: ${e1.map { it.type }}", short.erratic(brief.t.last()))       // enough after a warning...
+            assertFalse("rotation $k: ${e1.map { it.type }}", short.clearlyErratic(brief.t.last())) // ...not without one
+
+            val long = DrivingWatch()
+            val minute = Recording.concat(drive(20.0, seed = 40 + k) { 0.0 }, weavingDrive(75.0, seed = 44 + k)).rotated(r)
+            val e2 = run(long, minute)
+            assertTrue("rotation $k: ${e2.map { it.type }}", long.clearlyErratic(minute.t.last()))
+        }
+    }
+
+    @Test
+    fun aWindingRoadIsNotClearlyErratic() {
+        // A hill road: a curve every 7 s, alternating left and right, for 5 minutes.
+        for ((k, r) in rotations.withIndex()) {
+            val w = DrivingWatch()
+            val rec = drive(300.0, seed = 50 + k, speed = 6.0) { ts ->
+                val n = (ts / 7.0).toInt()
+                bump(ts % 7.0, 0.0, 7.0, if (n % 2 == 0) 0.25 else -0.25)
+            }.rotated(r)
+            val events = run(w, rec)
+            assertFalse("rotation $k: ${events.map { it.type }}", w.clearlyErratic(rec.t.last()))
+        }
+    }
+
+    @Test
+    fun threeHardBrakesAreNotClearlyErraticSixAre() {
+        val brakes = { times: List<Double> -> drive(280.0, seed = 60, fwd = { ts -> -times.sumOf { bump(ts, it, 2.0, 6.5) } }) { 0.0 } }
+        val three = DrivingWatch()
+        val r3 = brakes(listOf(40.0, 90.0, 140.0))
+        run(three, r3)
+        assertTrue(three.erratic(r3.t.last()))
+        assertFalse(three.clearlyErratic(r3.t.last()))
+
+        val six = DrivingWatch()
+        val r6 = brakes(listOf(30.0, 70.0, 110.0, 150.0, 190.0, 230.0))
+        val events = run(six, r6)
+        assertEquals(events.map { it.type }.toString(), 6, events.count { it.type == DrivingEventType.HARSH_BRAKING })
+        assertTrue(six.clearlyErratic(r6.t.last()))
+    }
 }

@@ -73,6 +73,17 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         private fun setRunning(context: Context, on: Boolean) =
             context.getSharedPreferences(SERVICE_PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_RUNNING, on).apply()
 
+        /** Started and not yet destroyed in this process (the watchdog leaves a running service alone). */
+        @Volatile var alive = false
+            private set
+
+        /** "Stop sensing" on the dashboard: not restarted by the watchdog or after a reboot. */
+        fun stopByUser(context: Context) {
+            setRunning(context, false)
+            WatchdogReceiver.cancel(context)
+            context.stopService(Intent(context, SensingForegroundService::class.java))
+        }
+
         /** Needed to see car Bluetooth connections (runtime permission on Android 12+). */
         fun hasBluetoothPermission(context: Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
@@ -158,13 +169,15 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             setRunning(this, false) // stopped by the user: not restarted after a reboot
+            WatchdogReceiver.cancel(this)
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action == ContactAlert.ACTION_CANCEL) {
-            // "Cancel – I'm a passenger" in the alert notification.
+        if (intent?.action == ContactAlert.ACTION_CANCEL || intent?.action == ContactAlert.ACTION_OK) {
+            // "Cancel – I'm a passenger" / "I'm OK" in the alert notification.
             if (!started) { stopSelf(); return START_NOT_STICKY }
-            handler.post { contactAlert?.cancel(asPassenger = true) }
+            if (intent.action == ContactAlert.ACTION_OK) handler.post { contactAlert?.ok() }
+            else handler.post { contactAlert?.cancel(asPassenger = true) }
             return START_STICKY
         }
         if (started) return START_STICKY
@@ -181,13 +194,23 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
             return START_NOT_STICKY
         }
         started = true
+        alive = true
         setRunning(this, true)
+        WatchdogReceiver.schedule(this)
+        notificationManager.cancel(WatchdogReceiver.STOPPED_NOTIFICATION_ID)
         SensingRepository.setMessage(null)
         handler.post { startSensing() }
         return START_STICKY
     }
 
+    /** Swiped away from the recent apps: the service normally keeps running; if the phone stops it, the watchdog restarts it. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (wasRunning(this)) WatchdogReceiver.checkSoon(this)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        alive = false
         SensingRepository.detach(this)
         if (started) handler.post { stopSensing() }
         thread.quitSafely() // runs the pending teardown first
@@ -219,6 +242,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         FitToDriveStore.load(this)?.let { e.fitToDrive.restore(it) }
         e.setFitToDriveEnabled(FitToDriveStore.isEnabled(this))
         engine = e
+        updateWatchEveryTrip()
         loadStudySettings()
 
         val sink = object : ImuSink {
@@ -419,9 +443,15 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 WalkSessionStage.DONE -> R.string.fit_say_walk_done
                 WalkSessionStage.TIMED_OUT -> R.string.fit_say_walk_timeout
             }), interrupt = false)
-            is FitToDriveEvent.ErraticDriving -> {
+            is FitToDriveEvent.ErraticDriving -> if (event.warned) {
                 notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_erratic_text), balanceAction = false)
                 if (!alert().start(AlertKind.ERRATIC_DRIVING)) speak(getString(R.string.fit_say_erratic))
+            } else {
+                // No warning: ask the driver first ("Are you OK?"); only no answer reaches the contact.
+                if (!alert().start(AlertKind.UNSTEADY_DRIVING)) {
+                    notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_unsteady_text), balanceAction = false)
+                    speak(getString(R.string.fit_say_erratic))
+                }
             }
             is FitToDriveEvent.BalanceDone -> {
                 studyLogBalance(event.result)
@@ -455,7 +485,10 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
     }
 
     private fun alert(): ContactAlert = contactAlert ?: ContactAlert(this, handler, notificationManager, ALERT_CHANNEL_ID,
-        say = { speak(it) }, onPassenger = { engine?.confirmPassenger() }).also { contactAlert = it }
+        say = { speak(it) }, onPassenger = { engine?.confirmPassenger() }, onOk = { engine?.driverOk() }).also { contactAlert = it }
+
+    /** With the contact alert on, every trip is watched (a higher bar, the driver asked first), not only after a warning. */
+    private fun updateWatchEveryTrip() { engine?.setFitWatchEveryTrip(ContactAlert.ready(this)) }
 
     /**
      * Health, plus location while the contact alert may need it (the location of
@@ -590,12 +623,14 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         handler.post {
             updateFitSensors()
             loadStudySettings()
+            updateWatchEveryTrip()
         }
     }
 
     override fun requestFitCheck() { handler.post { engine?.requestFitCheck() } }
 
     override fun cancelContactAlert() { handler.post { contactAlert?.cancel(asPassenger = true) } }
+    override fun driverOk() { handler.post { contactAlert?.ok() } }
     override fun startWalkRecording(position: CarryPosition) { handler.post { engine?.startWalkRecording(position) } }
     override fun stopWalkRecording() { handler.post { engine?.stopWalkRecording() } }
 

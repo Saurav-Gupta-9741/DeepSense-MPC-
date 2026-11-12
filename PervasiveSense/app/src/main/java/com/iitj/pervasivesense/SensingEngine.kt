@@ -202,6 +202,11 @@ class SensingEngine(
     }
 
     fun confirmPassenger() = fitCommand { fitToDrive.confirmPassenger() }
+    /** "I'm OK" when asked about unsteady driving (no warning). */
+    fun driverOk() = fitCommand { fitToDrive.driverOk(lastSampleT) }
+
+    /** Every trip watched (the contact alert is on), not only after a warning. */
+    fun setFitWatchEveryTrip(on: Boolean) { fitToDrive.watchEveryTrip = on }
     fun stopWalkRecording() = fitCommand { fitToDrive.stopWalkRecording() }
 
     /** Set-up step 1, guided; false if the walk is already learned or no sensor data yet. */

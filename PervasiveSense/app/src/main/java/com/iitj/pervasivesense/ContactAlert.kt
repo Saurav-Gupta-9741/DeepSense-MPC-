@@ -32,7 +32,13 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.ceil
 
-enum class AlertKind { DRIVING_AFTER_WARNING, ERRATIC_DRIVING, TEST }
+enum class AlertKind {
+    DRIVING_AFTER_WARNING,
+    ERRATIC_DRIVING,
+    /** Unsteady driving with no warning: the driver is asked "Are you OK?" first; no answer reaches the contact. */
+    UNSTEADY_DRIVING,
+    TEST
+}
 
 /** A contact alert counting down (shown on the fit-to-drive screen). */
 data class AlertCountdown(val kind: AlertKind, val secondsLeft: Int, val contactName: String)
@@ -44,7 +50,10 @@ data class AlertCountdown(val kind: AlertKind, val secondsLeft: Int, val contact
  * alarm never reaches the contact. Then a text message from the user's own
  * phone, with the location if the user allowed it, then (if allowed) a phone
  * call to the contact on speaker. At most one alert of each kind per hour.
- * Runs on the service's sensing thread ([handler]).
+ * Unsteady driving with no warning ([AlertKind.UNSTEADY_DRIVING]) asks the driver
+ * first, for [ASK_SEC], spoken again near the end: "I'm OK" or "I'm a passenger"
+ * stops it, no answer sends it. The countdown also opens [AlertActivity] over the
+ * lock screen. Runs on the service's sensing thread ([handler]).
  */
 class ContactAlert(
     private val context: Context,
@@ -53,14 +62,39 @@ class ContactAlert(
     private val channelId: String,
     private val say: (String) -> Unit,
     /** Cancelled with "I'm a passenger": stop watching this trip. */
-    private val onPassenger: () -> Unit
+    private val onPassenger: () -> Unit,
+    /** "I'm OK" when asked about unsteady driving: not asked again for a while on this trip. */
+    private val onOk: () -> Unit = {}
 ) {
     companion object {
         private const val TAG = "ContactAlert"
         const val COUNTDOWN_SEC = 30
         const val TEST_COUNTDOWN_SEC = 10
+        /** Unsteady driving with no warning: time to answer "Are you OK?" before the contact is alerted. */
+        const val ASK_SEC = 60
+        /** ...asked again (spoken) when this many seconds are left. */
+        private val ASK_AGAIN_AT = setOf(30, 10)
         const val NOTIFICATION_ID = 1005
         const val ACTION_CANCEL = "com.iitj.pervasivesense.action.CANCEL_ALERT"
+        const val ACTION_OK = "com.iitj.pervasivesense.action.DRIVER_OK"
+
+        fun countdownSec(k: AlertKind) = when (k) {
+            AlertKind.TEST -> TEST_COUNTDOWN_SEC
+            AlertKind.UNSTEADY_DRIVING -> ASK_SEC
+            AlertKind.DRIVING_AFTER_WARNING, AlertKind.ERRATIC_DRIVING -> COUNTDOWN_SEC
+        }
+
+        /** What the countdown is about. */
+        fun detailText(c: Context, k: AlertKind, contactName: String): String = when (k) {
+            AlertKind.DRIVING_AFTER_WARNING -> c.getString(R.string.fit_alert_detail_driving)
+            AlertKind.ERRATIC_DRIVING -> c.getString(R.string.fit_alert_detail_erratic)
+            AlertKind.UNSTEADY_DRIVING -> c.getString(R.string.fit_alert_detail_unsteady, contactName)
+            AlertKind.TEST -> c.getString(R.string.fit_alert_detail_test)
+        }
+
+        /** Android 14+ lets an app open a screen over the lock screen only with this permission. */
+        fun canUseFullScreen(c: Context) = Build.VERSION.SDK_INT < 34 ||
+            c.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() != false
         private const val REPEAT_MS = 3_600_000L
         /** No signal (e.g. a tunnel, a basement car park): a real alert is tried again every 30 s, 4 more times. */
         private const val RETRY_ROUNDS = 4
@@ -127,6 +161,8 @@ class ContactAlert(
     private val call = Runnable { placeCall(callPhone) }
     private val lastSent = HashMap<AlertKind, Long>()
     private val tick = Runnable { update() }
+    /** Seconds-left marks already spoken ("Are you OK?" asked again). */
+    private val askedAgain = HashSet<Int>()
 
     val running get() = kind != null
 
@@ -144,16 +180,18 @@ class ContactAlert(
         if (!ready(context)) return false
         SensingRepository.setFailedSms(null)
         kind = k
-        deadline = now + 1000L * (if (k == AlertKind.TEST) TEST_COUNTDOWN_SEC else COUNTDOWN_SEC)
+        deadline = now + 1000L * countdownSec(k)
+        askedAgain.clear()
         location = null
         requestLocation()
         say(context.getString(when (k) {
             AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_say_alert_driving
             AlertKind.ERRATIC_DRIVING -> R.string.fit_say_alert_erratic
+            AlertKind.UNSTEADY_DRIVING -> R.string.fit_say_alert_unsteady
             AlertKind.TEST -> R.string.fit_say_alert_test
         }))
+        update() // the countdown is published before the alert screen opens and reads it
         postCountdownNotification(k)
-        update()
         return true
     }
 
@@ -164,6 +202,18 @@ class ContactAlert(
         notificationManager.cancel(NOTIFICATION_ID)
         if (asPassenger && k != AlertKind.TEST) onPassenger()
         say(context.getString(R.string.fit_say_alert_cancelled))
+    }
+
+    /**
+     * "I'm OK", only for the question asked after unsteady driving with no warning (after a warning,
+     * only "I'm a passenger" stops the alert: someone impaired would also say they are OK).
+     */
+    fun ok() {
+        if (kind != AlertKind.UNSTEADY_DRIVING) return
+        stop()
+        notificationManager.cancel(NOTIFICATION_ID)
+        onOk()
+        say(context.getString(R.string.fit_say_alert_ok))
     }
 
     fun shutdown() {
@@ -184,6 +234,10 @@ class ContactAlert(
         val k = kind ?: return
         val left = ceil((deadline - SystemClock.elapsedRealtime()) / 1000.0).toInt()
         if (left <= 0) { send(k); return }
+        // The driver may not have heard the first question (music, a call): ask again.
+        if (k == AlertKind.UNSTEADY_DRIVING && left in ASK_AGAIN_AT && askedAgain.add(left)) {
+            say(context.getString(R.string.fit_say_alert_unsteady_again, left))
+        }
         SensingRepository.setAlert(AlertCountdown(k, left, contactName()))
         handler.postDelayed(tick, 1000L)
     }
@@ -196,6 +250,7 @@ class ContactAlert(
         var text = context.getString(when (k) {
             AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_sms_driving
             AlertKind.ERRATIC_DRIVING -> R.string.fit_sms_erratic
+            AlertKind.UNSTEADY_DRIVING -> R.string.fit_sms_unsteady
             AlertKind.TEST -> R.string.fit_sms_test
         })
         if (loc != null) {
@@ -442,27 +497,38 @@ class ContactAlert(
             Intent(context, SensingForegroundService::class.java).setAction(ACTION_CANCEL),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val secs = ((deadline - SystemClock.elapsedRealtime()) / 1000).toInt()
-        val title = context.getString(R.string.fit_alert_notify_title, contactName())
-        val text = context.getString(when (k) {
-            AlertKind.DRIVING_AFTER_WARNING -> R.string.fit_alert_detail_driving
-            AlertKind.ERRATIC_DRIVING -> R.string.fit_alert_detail_erratic
-            AlertKind.TEST -> R.string.fit_alert_detail_test
-        })
-        notificationManager.notify(NOTIFICATION_ID, NotificationCompat.Builder(context, channelId)
+        val title = context.getString(if (k == AlertKind.UNSTEADY_DRIVING) R.string.fit_alert_ask_notify_title
+            else R.string.fit_alert_notify_title, contactName())
+        val text = detailText(context, k, contactName())
+        val b = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // readable on the lock screen
             .setWhen(System.currentTimeMillis() + secs * 1000L)
             .setUsesChronometer(true)
             .setChronometerCountDown(true)
             .setOngoing(true)
-            .setContentIntent(openScreen())
-            .addAction(0, context.getString(if (k == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel), cancel)
-            .build())
+            .setContentIntent(openAlertScreen(33))
+            // Screen off or locked: the alert screen opens over the lock screen (Android 14+: only with
+            // the full-screen permission; without it this is a heads-up notification).
+            .setFullScreenIntent(openAlertScreen(36), true)
+        if (k == AlertKind.UNSTEADY_DRIVING) {
+            val ok = PendingIntent.getService(context, 37,
+                Intent(context, SensingForegroundService::class.java).setAction(ACTION_OK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            b.addAction(0, context.getString(R.string.fit_alert_ok), ok)
+        }
+        b.addAction(0, context.getString(if (k == AlertKind.TEST) R.string.fit_cancel else R.string.fit_alert_cancel), cancel)
+        notificationManager.notify(NOTIFICATION_ID, b.build())
     }
+
+    private fun openAlertScreen(code: Int) = PendingIntent.getActivity(context, code,
+        Intent(context, AlertActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     // ------------------------------------------------------------------ location (optional)
     /** A fresh fix during the countdown, from the network (fast) and GPS (accurate): the more accurate one wins. */
