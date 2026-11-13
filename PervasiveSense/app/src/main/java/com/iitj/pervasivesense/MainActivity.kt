@@ -30,6 +30,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_ACK_FALL = "com.iitj.pervasivesense.extra.ACK_FALL"
+        /** From the "sensing stopped" notification: start it again (the app is in the foreground now). */
+        const val EXTRA_RESTART = "com.iitj.pervasivesense.extra.RESTART"
         private const val KEY_DIAGNOSTICS = "diagnostics_open"
     }
 
@@ -49,15 +51,16 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnToggleService.setOnClickListener {
             when (SensingRepository.status.value) {
-                ServiceStatus.RUNNING, ServiceStatus.STARTING ->
-                    stopService(Intent(this, SensingForegroundService::class.java))
+                ServiceStatus.RUNNING, ServiceStatus.STARTING -> SensingForegroundService.stopByUser(this)
                 ServiceStatus.STOPPED -> requestPermissionsThenStart()
             }
         }
         binding.btnFallAck.setOnClickListener { SensingRepository.acknowledgeFall() }
+        binding.btnFallSignal.setOnClickListener { shownFallCheck?.let { showFallSignal(it) } }
         val openFit = View.OnClickListener { startActivity(Intent(this, FitToDriveActivity::class.java)) }
         binding.cardFit.setOnClickListener(openFit)
         binding.btnFitOpen.setOnClickListener(openFit)
+        binding.btnFitAction.setOnClickListener { onFitAction() }
         diagnosticsOpen = savedInstanceState?.getBoolean(KEY_DIAGNOSTICS) ?: false
         binding.tvDiagnosticsToggle.setOnClickListener {
             diagnosticsOpen = !diagnosticsOpen
@@ -65,6 +68,9 @@ class MainActivity : AppCompatActivity() {
         }
         applyDiagnosticsVisibility()
         handleIntent(intent)
+        // On by default (fall detection must run all the time): only "Stop sensing" keeps it off.
+        if (savedInstanceState == null && SensingRepository.status.value == ServiceStatus.STOPPED &&
+            !SensingForegroundService.userStopped(this)) requestPermissionsThenStart()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -99,6 +105,10 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra(EXTRA_ACK_FALL, false) == true) {
             SensingRepository.acknowledgeFall()
             intent.removeExtra(EXTRA_ACK_FALL)
+        }
+        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
+            intent.removeExtra(EXTRA_RESTART)
+            if (SensingRepository.status.value == ServiceStatus.STOPPED) requestPermissionsThenStart()
         }
     }
 
@@ -155,12 +165,12 @@ class MainActivity : AppCompatActivity() {
     private fun render(status: ServiceStatus, s: SensingSnapshot?, message: String?) {
         renderControls(status, s, message)
         renderHero(status, s)
+        renderFit(status, s?.fitToDrive, inVehicle = s?.context == "IN_VEHICLE")
         if (s == null) return
         renderProbabilities(s, active = status == ServiceStatus.RUNNING)
         renderPosture(s)
         renderWellness(s.wellness)
         renderSafety(s)
-        renderFit(s.fitToDrive, inVehicle = s.context == "IN_VEHICLE")
         renderRoad(s)
         renderLog(s)
         renderDiagnostics(s)
@@ -312,34 +322,168 @@ class MainActivity : AppCompatActivity() {
         }
         tvFallStatus.setText(status)
         tvFallStatus.setTextColor(color(dot))
-        tvFallDetail.setText(detail)
+        // While monitoring: why the last drop (within 10 min) was or was not a fall.
+        val c = s.lastFallCheck?.takeIf { s.fallState == FallState.MONITORING && System.currentTimeMillis() - it.wallMillis < 600_000L }
+        tvFallDetail.text = if (c == null) {
+            if (s.fallState == FallState.MONITORING) fallWatchText() else getString(detail)
+        } else getString(R.string.fall_last_check,
+            fitTime.format(Date(c.wallMillis)), c.peakG, c.verdict?.speedMs ?: 0f, fallCheckText(c))
         fallDot.backgroundTintList = tint(dot)
+        // The signal of the last judged drop (also while a fall is shown): for a report, and to see why.
+        shownFallCheck = s.lastFallCheck?.takeIf { s.fallState != FallState.IMPACT_SUSPECTED &&
+            (it.verdict?.trace?.size ?: 0) > 1 && System.currentTimeMillis() - it.wallMillis < 600_000L }
+        btnFallSignal.visibility = if (shownFallCheck != null) View.VISIBLE else View.GONE
         btnFallAck.visibility = if (s.fallState == FallState.FALL_CONFIRMED) View.VISIBLE else View.GONE
     }
 
-    private fun renderFit(f: FitToDriveReport, inVehicle: Boolean) = with(binding) {
-        val warning = f.advice == FitAdvice.TAKE_BALANCE_CHECK || f.advice == FitAdvice.DONT_DRIVE
-        val (text, dot) = when {
-            !f.enabled -> getString(R.string.fit_card_off) to R.color.text_muted
-            warning && inVehicle -> getString(R.string.fit_advice_stop_title) to R.color.accent_rose
-            f.advice == FitAdvice.CONSIDER_BALANCE_CHECK -> getString(R.string.fit_advice_consider_title) to R.color.accent_amber
-            f.advice == FitAdvice.TAKE_BALANCE_CHECK -> getString(R.string.fit_advice_balance_title) to R.color.accent_amber
-            f.advice == FitAdvice.DONT_DRIVE -> getString(R.string.fit_advice_dont_title) to R.color.accent_rose
-            f.advice == FitAdvice.BALANCE_OK -> getString(R.string.fit_advice_ok_title) to R.color.accent_emerald
-            f.baselineStatus == BaselineStatus.LEARNING ->
-                getString(R.string.fit_card_learning, pct(f.baselineSegments.toFloat() / f.segmentsForProvisional)) to R.color.accent_amber
+    private var shownFallCheck: FallCheckReport? = null
+
+    private fun fallCheckText(c: FallCheckReport): String = getString(when (c.check) {
+        FallCheck.FALL -> R.string.fall_check_fall
+        FallCheck.HARD_LANDING -> R.string.fall_check_hard
+        FallCheck.SET_DOWN -> if ((c.verdict?.speedMs ?: 0f) < 1.5f) R.string.fall_check_set_down else R.string.fall_check_held_flat
+        FallCheck.MOVED -> R.string.fall_check_moved
+        FallCheck.NO_TURN -> R.string.fall_check_no_turn
+        FallCheck.SOFT_LANDING -> R.string.fall_check_soft
+        FallCheck.GAP -> R.string.fall_check_gap
+    })
+
+    /** The acceleration around the last judged drop, with what was measured and the verdict. */
+    private fun showFallSignal(c: FallCheckReport) {
+        val v = c.verdict ?: return
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        box.addView(FallSignalView(this, v))
+        val turned = if (v.turnDeg.isNaN()) getString(R.string.fall_signal_turn_none)
+            else getString(R.string.fall_signal_turn, v.turnDeg)
+        box.addView(android.widget.TextView(this).apply {
+            text = getString(R.string.fall_signal_summary,
+                v.fallSec, getString(if (v.dropped) R.string.fall_signal_dropped else R.string.fall_signal_body),
+                v.speedMs, v.peakG, turned, fallCheckText(c))
+            setTextColor(color(R.color.text_main))
+            textSize = 13f
+            setPadding(0, pad / 2, 0, 0)
+        })
+        box.addView(android.widget.TextView(this).apply {
+            setText(R.string.fall_signal_legend)
+            setTextColor(color(R.color.text_muted))
+            textSize = 11f
+            setPadding(0, pad / 2, 0, 0)
+        })
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.fall_signal_title, timeFormat.format(Date(c.wallMillis))))
+            .setView(android.widget.ScrollView(this).apply { addView(box) })
+            .setPositiveButton(R.string.fall_signal_close, null)
+            .show()
+    }
+
+    /** Fall detection is always on; say who a fall reaches. */
+    private fun fallWatchText(): String = if (ContactAlert.readyForFall(this))
+        getString(R.string.fall_monitoring_contact, FitToDriveStore.contactName(this).ifBlank { FitToDriveStore.contactPhone(this) })
+    else getString(R.string.fall_monitoring_no_contact)
+
+    /** What the big button on the Fit to drive card does right now. */
+    private enum class FitAction { TURN_ON, SET_UP, CHECK, BALANCE, CAB, START, NONE }
+    private var fitAction = FitAction.TURN_ON
+    private val fitTime = SimpleDateFormat("HH:mm", Locale.getDefault())
+
+    /**
+     * The Fit to drive card, first on the dashboard: one headline (the state that matters now),
+     * one line of detail, whether drives are watched, and the one thing to do next. The border
+     * takes the state's colour. Never offers a test while in a vehicle.
+     */
+    private fun renderFit(status: ServiceStatus, f: FitToDriveReport?, inVehicle: Boolean) = with(binding) {
+        val enabled = FitToDriveStore.isEnabled(this@MainActivity)
+        val warning = f != null && (f.advice == FitAdvice.TAKE_BALANCE_CHECK || f.advice == FitAdvice.DONT_DRIVE)
+        val balanceAction = if (inVehicle) FitAction.NONE else FitAction.BALANCE
+        class FitView(val head: String, val detail: String, val colour: Int, val action: FitAction)
+        val v = when {
+            !enabled -> FitView(getString(R.string.fit_card_head_off), getString(R.string.fit_card_off), R.color.text_muted, FitAction.TURN_ON)
+            status == ServiceStatus.STOPPED -> FitView(getString(R.string.fit_card_head_stopped), getString(R.string.fit_card_stopped),
+                R.color.accent_rose, FitAction.START)
+            f == null -> FitView(getString(R.string.hero_starting), "", R.color.text_muted, FitAction.NONE)
+            warning && inVehicle -> FitView(getString(R.string.fit_advice_stop_title), getString(R.string.fit_advice_stop_detail),
+                R.color.accent_rose, FitAction.NONE)
+            f.advice == FitAdvice.DONT_DRIVE -> FitView(getString(R.string.fit_advice_dont_title), getString(R.string.fit_advice_dont_detail),
+                R.color.accent_rose, FitAction.CAB)
+            f.advice == FitAdvice.TAKE_BALANCE_CHECK -> FitView(getString(R.string.fit_advice_balance_title),
+                getString(R.string.fit_advice_balance_detail, pct(f.lastCheck?.percentile ?: 0.99f)), R.color.accent_amber, balanceAction)
+            f.advice == FitAdvice.CONSIDER_BALANCE_CHECK -> FitView(getString(R.string.fit_advice_consider_title),
+                getString(R.string.fit_advice_consider_detail), R.color.accent_amber, balanceAction)
+            f.advice == FitAdvice.BALANCE_OK -> FitView(getString(R.string.fit_advice_ok_title), getString(R.string.fit_advice_ok_detail),
+                R.color.accent_emerald, FitAction.NONE)
+            f.baselineStatus == BaselineStatus.LEARNING -> FitView(getString(R.string.fit_card_head_setup),
+                getString(R.string.fit_card_learning, pct(f.baselineSegments.toFloat() / f.segmentsForProvisional)), R.color.accent_amber, FitAction.SET_UP)
+            f.balanceReferences < f.balanceReferencesNeeded -> FitView(getString(R.string.fit_card_head_setup),
+                getString(R.string.fit_card_balance_left, f.balanceReferences, f.balanceReferencesNeeded), R.color.accent_amber, FitAction.SET_UP)
             else -> {
-                val last = when (f.lastCheck?.level) {
-                    null -> getString(R.string.fit_last_title) + ": --"
-                    WalkLevel.NORMAL -> getString(R.string.fit_level_normal)
-                    WalkLevel.UNUSUAL -> getString(R.string.fit_level_unusual)
-                    WalkLevel.LARGE_GAP -> getString(R.string.fit_level_large)
+                val c = f.lastCheck
+                val (head, colour) = when (c?.level) {
+                    null -> getString(R.string.fit_card_head_ready) to R.color.accent_emerald
+                    WalkLevel.NORMAL -> getString(R.string.fit_level_normal) to R.color.accent_emerald
+                    WalkLevel.UNUSUAL -> getString(R.string.fit_level_unusual) to R.color.accent_amber
+                    WalkLevel.LARGE_GAP -> getString(R.string.fit_level_large) to R.color.accent_rose
                 }
-                getString(R.string.fit_card_ready, last) to R.color.accent_emerald
+                val detail = if (c?.level == null) getString(R.string.fit_card_no_check)
+                    else getString(R.string.fit_card_last, fitTime.format(Date(c.wallMillis)), getString(when (c.trigger) {
+                        CheckTrigger.TRIP_START -> R.string.fit_trigger_trip
+                        CheckTrigger.CAR_BLUETOOTH -> R.string.fit_trigger_bt
+                        CheckTrigger.MANUAL -> R.string.fit_trigger_manual
+                    }))
+                FitView(head, detail, colour, if (inVehicle) FitAction.NONE else FitAction.CHECK)
             }
         }
-        tvFitStatus.text = text
-        fitDot.backgroundTintList = tint(dot)
+        tvFitHeadline.text = v.head
+        tvFitHeadline.setTextColor(color(if (v.colour == R.color.text_muted) R.color.text_main else v.colour))
+        tvFitStatus.text = v.detail
+        tvFitStatus.visibility = if (v.detail.isEmpty()) View.GONE else View.VISIBLE
+        fitDot.backgroundTintList = tint(v.colour)
+        cardFit.strokeColor = color(if (v.colour == R.color.text_muted) R.color.card_border else v.colour)
+
+        // Is every drive watched? (the contact alert is the safety net)
+        val watch = when {
+            !enabled || status == ServiceStatus.STOPPED || f == null -> null
+            f.testDriveSecondsLeft > 0 -> getString(R.string.fit_card_test_drive,
+                String.format(Locale.US, "%d:%02d", f.testDriveSecondsLeft / 60, f.testDriveSecondsLeft % 60),
+                f.testDrivePoints, f.testDrivePointsNeeded) to R.color.primary_glow
+            f.watchingDriving -> getString(R.string.fit_watching_driving) to R.color.accent_amber
+            ContactAlert.ready(this@MainActivity) -> getString(R.string.fit_card_watch_all,
+                FitToDriveStore.contactName(this@MainActivity).ifBlank { FitToDriveStore.contactPhone(this@MainActivity) }) to R.color.accent_emerald
+            else -> getString(R.string.fit_card_watch_voice) to R.color.accent_amber
+        }
+        tvFitWatch.visibility = if (watch != null) View.VISIBLE else View.GONE
+        watch?.let { (text, col) -> tvFitWatch.text = text; tvFitWatch.setTextColor(color(col)) }
+
+        fitAction = v.action
+        btnFitAction.visibility = if (v.action == FitAction.NONE) View.GONE else View.VISIBLE
+        btnFitAction.setText(when (v.action) {
+            FitAction.TURN_ON -> R.string.fit_card_action_on
+            FitAction.SET_UP -> R.string.fit_card_action_setup
+            FitAction.CHECK -> R.string.fit_check_now
+            FitAction.BALANCE -> R.string.fit_action_balance
+            FitAction.CAB -> R.string.fit_action_cab
+            FitAction.START, FitAction.NONE -> R.string.action_start
+        })
+        btnFitAction.backgroundTintList = tint(if (v.colour == R.color.accent_rose && v.action != FitAction.START) R.color.accent_amber else R.color.primary_cyan)
+    }
+
+    private fun onFitAction() {
+        val fit = Intent(this, FitToDriveActivity::class.java)
+        when (fitAction) {
+            FitAction.TURN_ON, FitAction.SET_UP -> startActivity(fit)
+            FitAction.CHECK -> startActivity(fit.putExtra(FitToDriveActivity.EXTRA_CHECK_NOW, true))
+            FitAction.BALANCE -> startActivity(fit.putExtra(FitToDriveActivity.EXTRA_START_BALANCE, true))
+            FitAction.CAB -> try {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode("taxi"))))
+            } catch (e: android.content.ActivityNotFoundException) {
+                android.widget.Toast.makeText(this, R.string.fit_no_app, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            FitAction.START -> requestPermissionsThenStart()
+            FitAction.NONE -> Unit
+        }
     }
 
     private fun renderRoad(s: SensingSnapshot) = with(binding) {

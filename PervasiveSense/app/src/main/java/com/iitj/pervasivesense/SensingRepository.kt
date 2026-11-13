@@ -25,16 +25,30 @@ object SensingRepository {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    /** A contact alert counting down (fit to drive), or null. */
+    private val _alert = MutableStateFlow<AlertCountdown?>(null)
+    val alert: StateFlow<AlertCountdown?> = _alert.asStateFlow()
+
     /** Commands from UI / receivers to the running service (null when stopped). */
     interface Controller {
         fun setUiVisible(visible: Boolean)
         fun acknowledgeFall()
+        fun helpNow()
         fun onVehicleConfidence(confidence: Int)
         fun setFitToDriveEnabled(enabled: Boolean)
         fun refreshFitSettings()
         fun requestFitCheck()
-        fun startBalanceTest(purpose: BalancePurpose)
+        fun startBalanceTest(purpose: BalancePurpose, practice: Boolean)
+        fun cancelContactAlert()
+        fun driverOk()
+        fun startTestDrive()
+        fun stopTestDrive()
+        fun startWalkRecording(position: CarryPosition)
+        fun stopWalkRecording()
+        fun sendTestAlert()
         fun cancelBalanceTest()
+        fun startFitPractice(kind: PracticeWalk)
+        fun cancelFitPractice()
         fun dismissFitAdvice()
         fun resetFitToDrive()
     }
@@ -57,6 +71,15 @@ object SensingRepository {
     internal fun publish(s: SensingSnapshot) { _snapshot.value = s }
     internal fun setMessage(m: String?) { _message.value = m }
 
+    /** The contact alert that could not be texted (phone, text): the screen offers to send it from Messages. */
+    @Volatile var failedSms: Pair<String, String>? = null
+        private set
+    internal fun setFailedSms(s: Pair<String, String>?) { failedSms = s }
+
+    /** The user handled the failed alert (sent it from Messages): clear the banner. */
+    fun clearFailedSms() { failedSms = null; _message.value = null }
+    internal fun setAlert(a: AlertCountdown?) { _alert.value = a }
+
     /**
      * Each screen reports onStart/onStop. Counted, because when one screen opens
      * another the new one starts before the old one stops.
@@ -71,6 +94,8 @@ object SensingRepository {
     }
 
     fun acknowledgeFall() { controller?.acknowledgeFall() }
+    /** "Get help now" during a fall countdown: the text goes out at once. */
+    fun helpNow() { controller?.helpNow() }
 
     fun deliverVehicleConfidence(confidence: Int) { controller?.onVehicleConfidence(confidence) }
 
@@ -78,8 +103,20 @@ object SensingRepository {
     fun setFitToDriveEnabled(enabled: Boolean) { controller?.setFitToDriveEnabled(enabled) }
     fun refreshFitSettings() { controller?.refreshFitSettings() }
     fun requestFitCheck() { controller?.requestFitCheck() }
-    fun startBalanceTest(purpose: BalancePurpose) { controller?.startBalanceTest(purpose) }
+    fun startBalanceTest(purpose: BalancePurpose, practice: Boolean = false) { controller?.startBalanceTest(purpose, practice) }
+    /** "Cancel – I'm a passenger". */
+    fun cancelContactAlert() { controller?.cancelContactAlert() }
+    /** "I'm OK" when asked about unsteady driving. */
+    fun driverOk() { controller?.driverOk() }
+    /** "Test drive (no car)": the driving watch runs on the real sensors as if in a vehicle, for 5 minutes. */
+    fun startTestDrive() { controller?.startTestDrive() }
+    fun stopTestDrive() { controller?.stopTestDrive() }
+    fun sendTestAlert() { controller?.sendTestAlert() }
+    fun startWalkRecording(position: CarryPosition) { controller?.startWalkRecording(position) }
+    fun stopWalkRecording() { controller?.stopWalkRecording() }
     fun cancelBalanceTest() { controller?.cancelBalanceTest() }
+    fun startFitPractice(kind: PracticeWalk) { controller?.startFitPractice(kind) }
+    fun cancelFitPractice() { controller?.cancelFitPractice() }
     fun dismissFitAdvice() { controller?.dismissFitAdvice() }
     fun resetFitToDrive() { controller?.resetFitToDrive() }
 }

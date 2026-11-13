@@ -18,12 +18,25 @@ object FitToDriveStore {
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun isEnabled(c: Context) = prefs(c).getBoolean("enabled", false)
+    /** On by default: the walk is learned and every drive watched with no button to press (the switch turns it off). */
+    fun isEnabled(c: Context) = prefs(c).getBoolean("enabled", true)
     fun setEnabled(c: Context, on: Boolean) = prefs(c).edit().putBoolean("enabled", on).apply()
 
     /** Detect the car's Bluetooth to check before the car moves (opt-in). */
     fun useCarBluetooth(c: Context) = prefs(c).getBoolean("car_bluetooth", false)
     fun setUseCarBluetooth(c: Context, on: Boolean) = prefs(c).edit().putBoolean("car_bluetooth", on).apply()
+
+    /** Opt-in: text the trusted contact (after a countdown) when driving after a warning. */
+    fun alertContact(c: Context) = prefs(c).getBoolean("alert_contact", false)
+    fun setAlertContact(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alert_contact", on).apply()
+
+    /** With the contact alert: also phone the contact after the text (needs the call permission). On by default. */
+    fun alertCall(c: Context) = prefs(c).getBoolean("alert_call", true)
+    fun setAlertCall(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alert_call", on).apply()
+
+    /** Set-up step 3 (trusted contact) skipped. */
+    fun contactSkipped(c: Context) = prefs(c).getBoolean("contact_skipped", false)
+    fun setContactSkipped(c: Context, on: Boolean) = prefs(c).edit().putBoolean("contact_skipped", on).apply()
 
     fun contactName(c: Context): String = prefs(c).getString("contact_name", "") ?: ""
     fun contactPhone(c: Context): String = prefs(c).getString("contact_phone", "") ?: ""
@@ -43,11 +56,17 @@ object FitToDriveStore {
         for (e in s.baseline) {
             val row = JSONArray().put(e.wallMillis).put(e.dayKey)
             e.values.forEach { row.put(num(it)) }
+            row.put(e.position.name)
+            e.signature?.forEach { row.put(num(it)) }
             baseline.put(row)
         }
         val balance = JSONArray()
         for (r in s.balanceReferences) balance.put(JSONArray().put(r.wallMillis).put(num(r.swayAccel)).put(num(r.swayGyro)))
-        val json = JSONObject().put("version", 1).put("baseline", baseline).put("balance", balance).toString()
+        val o = JSONObject().put("version", 1).put("baseline", baseline).put("balance", balance)
+        s.warnedWallMillis?.let { o.put("warned", it) }
+        s.cautionWallMillis?.let { o.put("caution", it) }
+        if (s.advice != FitAdvice.NONE && s.adviceWallMillis != null) o.put("advice", s.advice.name).put("advice_at", s.adviceWallMillis)
+        val json = o.toString()
 
         val file = AtomicFile(File(c.filesDir, FILE))
         val out = try { file.startWrite() } catch (e: Exception) { Log.w(TAG, "save", e); return }
@@ -65,14 +84,24 @@ object FitToDriveStore {
         val b = o.getJSONArray("baseline")
         val baseline = (0 until b.length()).map { i ->
             val row = b.getJSONArray(i)
-            BaselineEntry(row.getLong(0), row.getString(1), FloatArray(GaitFeature.COUNT) { k -> flt(row, 2 + k) })
+            val n = 2 + GaitFeature.COUNT
+            // Older data has no position (it was all pocket walking) and no signature.
+            val pos = if (row.length() > n) CarryPosition.entries.firstOrNull { it.name == row.optString(n) } ?: CarryPosition.POCKET
+                else CarryPosition.POCKET
+            val sig = if (row.length() >= n + 1 + GaitSegment.SIGNATURE_SIZE) FloatArray(GaitSegment.SIGNATURE_SIZE) { k -> flt(row, n + 1 + k) } else null
+            BaselineEntry(row.getLong(0), row.getString(1), FloatArray(GaitFeature.COUNT) { k -> flt(row, 2 + k) }, pos, sig)
         }
         val r = o.getJSONArray("balance")
         val refs = (0 until r.length()).map { i ->
             val row = r.getJSONArray(i)
             BalanceReference(row.getLong(0), flt(row, 1), flt(row, 2))
         }
-        FitToDriveState(baseline, refs)
+        val advice = FitAdvice.entries.firstOrNull { it.name == o.optString("advice") } ?: FitAdvice.NONE
+        FitToDriveState(baseline, refs,
+            warnedWallMillis = if (o.has("warned")) o.getLong("warned") else null,
+            advice = advice,
+            adviceWallMillis = if (o.has("advice_at")) o.getLong("advice_at") else null,
+            cautionWallMillis = if (o.has("caution")) o.getLong("caution") else null)
     } catch (e: java.io.FileNotFoundException) {
         null
     } catch (e: Exception) {

@@ -19,11 +19,32 @@
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Fit to drive, opt-in contact alert: a text message, with the location if allowed. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Optional: after the text, phone the contact on speaker. -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Sensing restarts after the phone restarts or the app is updated, if it was running. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Asks to be left out of battery optimisation, so the watch keeps running with the screen locked. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- An alert countdown ("Are you OK?") opens over the lock screen, so the driver can answer without unlocking. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Opens the alert screen directly where a phone blocks the full-screen notification (Xiaomi, Oppo, Vivo...). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- The alert screen buzzes until answered. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Optional: lists the SIMs so the contact alert can try another one (dual SIM). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -55,15 +76,39 @@
             android:parentActivityName=".MainActivity"
             android:theme="@style/Theme.PervasiveSense" />
 
+        <!-- A contact alert counting down, over the lock screen (from the alert's full-screen notification). -->
+        <activity
+            android:name=".AlertActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.iitj.pervasivesense.alert"
+            android:theme="@style/Theme.PervasiveSense" />
+
         <service
             android:name=".SensingForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="health" />
+            android:foregroundServiceType="health|location" />
 
         <!-- Receives Google Activity Recognition results through our own PendingIntent. -->
         <receiver
             android:name=".VehicleActivityReceiver"
+            android:exported="false" />
+
+        <!-- Restarts sensing after a reboot or an app update (only if it was running). -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Restarts sensing if the phone stopped it (every 15 min, and after the app is swiped away). -->
+        <receiver
+            android:name=".WatchdogReceiver"
             android:exported="false" />
 
     </application>

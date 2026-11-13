@@ -12,7 +12,7 @@ screen locked.
 > Fit-to-drive check: [`docs/FIT_TO_DRIVE.md`](docs/FIT_TO_DRIVE.md) ·
 > Phone test checklist: [`docs/PHONE_TEST_PLAN.md`](docs/PHONE_TEST_PLAN.md)
 
-> **Version 2.x.** v1 could not respond in real time and its model never loaded on
+> **Version 3.15** (`release/PervasiveSense-v3.15-fit-to-drive.apk`). Since v2: v1 could not respond in real time and its model never loaded on
 > a phone. The root causes, the fixes and the evidence are in
 > [What changed in v2](#what-changed-in-v2). Build the APK from source (see
 > [Build & run](#build--run)); the v1 APKs were removed because they contain the
@@ -32,7 +32,7 @@ screen locked.
 | Model | 82.8 KB dynamic-range INT8, 0.3 ms per inference (desktop CPU), 99.95 % argmax agreement with float |
 | Step counting on real walking / jogging / stairs (vs an independent gyroscope reference) | within 1 – 5 % |
 | Fit-to-drive, 24 people: sober held-out walk / simulated strong / mild impairment | large gap **1/24** / **24/24** / 18/24 (mild flagged 23/24) |
-| Automated tests | 82 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
+| Automated tests | 174 JVM tests of the real Kotlin engine + 24 model tests in the app's TFLite runtime |
 
 ---
 
@@ -117,6 +117,7 @@ classes (see [Limitations](#limitations)).
 | `WellnessScoreEngine.kt` | Daily score `0.3·Diversity + 0.3·Ergonomic + 0.2·Movement + 0.2·Safety` |
 | `GaitSegmentExtractor.kt`, `GaitBaseline.kt`, `BalanceTest.kt`, `FitToDriveMonitor.kt` | Fit-to-drive check: personal gait baseline, walk scoring, 30 s balance test, advice ([details](docs/FIT_TO_DRIVE.md)) |
 | `FitToDriveActivity.kt`, `FitToDriveStore.kt` | Fit-to-drive screen; settings and on-device persistence |
+| `DrivingWatch.kt`, `ContactAlert.kt`, `FitVoice.kt` | After a warning: weaving / jerky steering / harsh braking from an unmounted phone; opt-in text to the trusted contact after a 30 s cancel countdown; spoken guidance |
 | `SensingForegroundService.kt` | Sensing thread, eco batching, wake lock, notifications, persistence |
 | `SensorDataSource.kt` | `PhoneImuSource`; interface for adding wearable IMUs |
 
@@ -168,7 +169,7 @@ The TensorFlow version must match `org.tensorflow:tensorflow-lite` in `app/build
 
 See [`docs/TESTING.md`](docs/TESTING.md) for what each test proves.
 
-**1. Engine: 82 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
+**1. Engine: 174 JVM tests** (`PervasiveSense/app/src/test`). These exercise the
 real Kotlin code, mostly by replaying real MotionSense recordings delivered like
 a phone does: separate accel/gyro streams at 57.3 / 48.7 Hz with ±2 ms jitter.
 ```bash
@@ -196,7 +197,7 @@ checked against deliberately broken inputs.
 ## Get the APK
 
 Every push is built and tested by GitHub Actions (`.github/workflows/build.yml`):
-49 engine tests, 24 model tests on real data, then the debug APK.
+174 engine tests, 24 model tests on real data, then the debug APK. The latest phone build is also in `release/`.
 
 - **Latest build:** Actions tab → newest green *Build & test* run → *Artifacts* → `PervasiveSense-debug-apk` (a zip containing the APK).
 - **Release download:** pushing a tag such as `v2.0.0` publishes a GitHub Release with the APK attached.
@@ -235,7 +236,7 @@ The full feature-by-feature checklist is in
 PervasiveSense/                 Android app (Kotlin, minSdk 26, targetSdk 34)
   app/src/main/java/...          sources (table above)
   app/src/main/assets/           deepsense_int8.tflite, deepsense_labels.txt
-  app/src/test/                  82 JVM tests + real-data fixtures (MotionSense excerpts)
+  app/src/test/                  174 JVM tests + real-data fixtures (MotionSense excerpts)
 model/
   har_datasets.py                dataset loaders -> Android units, frame verification
   train_export_deepsense.py      training + TF 2.16.1 export + evaluation
@@ -252,7 +253,7 @@ docs/                           overview & novelties, phone test plan, testing g
 ## Limitations
 
 - **Vehicle subtype.** Only IN_VEHICLE is detected (via Google Play services); bus/car/metro need labelled real recordings. On phones without Play services, vehicle detection and road-hazard mapping are unavailable, and the dashboard says so.
-- **Falls.** Validated on physics-based scenarios plus zero false alarms on real daily activities. No labelled real fall recordings were available. A dropped phone that lies still can resemble a fall.
+- **Falls.** Validated on physics-based scenarios plus zero false alarms on real daily activities. No labelled real fall recordings were available. By design, a phone dropped from about 45 cm or more that then lies still asks "Did you fall? Are you OK?" (a person who falls often drops the phone); one tap on I'm OK ends it. A phone set down by hand is not a fall: a hand brakes before setting it down, so it hits at well under 1 m/s, while a fall hits at 1.5 m/s or more. The Fall detection card shows the signal of the last drop as a graph.
 - **Road anomalies.** Thresholds follow published smartphone road-sensing magnitudes and are validated on constructed shock profiles. They should be calibrated with real drives.
 - **Posture.** Tilt semantics assume a trouser pocket while seated.
 - **Energy.** Eco mode is implemented but its battery saving has not been measured.

@@ -2,6 +2,7 @@ package com.iitj.pervasivesense
 
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.ln
 import kotlin.math.sqrt
 
 /**
@@ -23,7 +24,19 @@ enum class GaitFeature(val label: String, val direction: Int) {
 }
 
 /** One analysed stretch of walking; [values] is indexed by [GaitFeature.ordinal]. */
-class GaitSegment(val tEndNanos: Long, val values: FloatArray)
+class GaitSegment(
+    val tEndNanos: Long,
+    val values: FloatArray,
+    /**
+     * How the phone moves on the body (not how the person walks): ln of the gyroscope RMS,
+     * ln of the RMS of |a|, ln of horizontal/vertical dynamic acceleration. All orientation-free.
+     * A trouser pocket swings with the leg, a hand with the arm, a jacket or belt barely rotates:
+     * matched against the user's own recorded positions (97.9 % right on Shoaib et al. 2014).
+     */
+    val signature: FloatArray = FloatArray(SIGNATURE_SIZE) { Float.NaN }
+) {
+    companion object { const val SIGNATURE_SIZE = 3 }
+}
 
 /**
  * Cuts continuous walking into overlapping segments ([segmentSamples] long, a
@@ -62,13 +75,20 @@ class GaitSegmentExtractor(
     private val minStrideSec: Float = 0.7f,
     private val maxStrideSec: Float = 2.0f,
     private val minPeriodicity: Float = 0.2f,
-    private val maxGapNanos: Long = 100_000_000L
+    private val maxGapNanos: Long = 100_000_000L,
+    /** A dropout of the walking gate up to this long (a turn, a door, the activity label or the
+     *  pocket sensor flickering) is skipped; only a longer stop restarts the segment. */
+    private val maxDropoutSamples: Int = 75 // 1.5 s
 ) {
     private val buf = FloatArray(segmentSamples * 6)
     private var head = 0
     private var filled = 0
     private var sinceEmit = 0
     private var lastT = Long.MIN_VALUE
+    private var dropout = 0
+    /** Segments that did not pass the quality checks (not a steady walk). */
+    var rejected = 0
+        private set
 
     // Work arrays for the analysis, allocated once.
     private val win = FloatArray(segmentSamples * 6)
@@ -84,12 +104,12 @@ class GaitSegmentExtractor(
     private val peaks = FloatArray(segmentSamples / 10)
 
     fun reset() {
-        head = 0; filled = 0; sinceEmit = 0
+        head = 0; filled = 0; sinceEmit = 0; dropout = 0
     }
 
     /**
-     * Feeds one uniform 50 Hz sample. [walking] gates collection (any other
-     * activity restarts the segment). Returns a segment when one completes and
+     * Feeds one uniform 50 Hz sample. [walking] gates collection (a short dropout
+     * is skipped, a stop of more than 1.5 s restarts the segment). Returns a segment when one completes and
      * passes the quality checks.
      */
     fun processSample(tNanos: Long, s: FloatArray, walking: Boolean, hasGyro: Boolean): GaitSegment? {
@@ -97,16 +117,18 @@ class GaitSegmentExtractor(
         if (lastT != Long.MIN_VALUE && tNanos - lastT > maxGapNanos) reset()
         lastT = tNanos
         if (!walking) {
-            if (filled > 0) reset()
+            // Skipped, not recorded; the segment restarts only after a real stop.
+            if (filled > 0 && ++dropout > maxDropoutSamples) reset()
             return null
         }
+        dropout = 0
         System.arraycopy(s, 0, buf, head * 6, 6)
         head = (head + 1) % segmentSamples
         if (filled < segmentSamples) filled++
         sinceEmit++
         if (filled < segmentSamples || sinceEmit < hopSamples) return null
         sinceEmit = 0
-        return analyse(tNanos, hasGyro)
+        return analyse(tNanos, hasGyro).also { if (it == null) rejected++ }
     }
 
     private fun analyse(tEnd: Long, hasGyro: Boolean): GaitSegment? {
@@ -150,6 +172,7 @@ class GaitSegmentExtractor(
         }
         val vRms = sqrt(vv / n)
         if (vRms < 0.5) return null // no real gait in this segment
+        val signature = signature(n, vv + s11 + s22, vv, hasGyro)
         s11 /= n; s22 /= n; s12 /= n
 
         // Side-to-side axis = minor principal axis of the horizontal plane.
@@ -208,7 +231,28 @@ class GaitSegmentExtractor(
         values[GaitFeature.SWAY.ordinal] = (sqrt(lambdaMin) / vRms).toFloat()
         values[GaitFeature.SWAY_IRREGULARITY.ordinal] = (sqrt(sideDiff / (2 * m)) / vRms).toFloat()
         values[GaitFeature.TURN_UNSTEADINESS.ordinal] = if (hasGyro) sqrt(yawDiff / (2 * m)).toFloat() else Float.NaN
-        return GaitSegment(tEnd, values)
+        return GaitSegment(tEnd, values, signature)
+    }
+
+    /** See [GaitSegment.signature]. [all] and [vertical]: summed squared dynamic acceleration. */
+    private fun signature(n: Int, all: Double, vertical: Double, hasGyro: Boolean): FloatArray {
+        var m1 = 0.0; var m2 = 0.0
+        val gm = DoubleArray(3)
+        for (i in 0 until n) {
+            val ax = win[i * 6].toDouble(); val ay = win[i * 6 + 1].toDouble(); val az = win[i * 6 + 2].toDouble()
+            val a = sqrt(ax * ax + ay * ay + az * az); m1 += a; m2 += a * a
+            for (k in 0..2) gm[k] += win[i * 6 + 3 + k].toDouble()
+        }
+        val mean = m1 / n
+        val dyn = sqrt(maxOf(0.0, m2 / n - mean * mean))
+        var gyro = Float.NaN
+        if (hasGyro) {
+            var gr = 0.0
+            for (i in 0 until n) for (k in 0..2) { val x = win[i * 6 + 3 + k] - gm[k] / n; gr += x * x }
+            gyro = ln(sqrt(gr / n) + 0.05).toFloat()
+        }
+        val hv = sqrt(maxOf(1e-6, all - vertical) / maxOf(1e-6, vertical))
+        return floatArrayOf(gyro, ln(dyn + 0.05).toFloat(), ln(hv).toFloat())
     }
 
     /**

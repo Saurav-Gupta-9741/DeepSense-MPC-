@@ -60,13 +60,37 @@ Simulate with the phone only, onto something soft but firm (sofa cushion or matt
 
 | # | Do this | Pass if |
 |---|---|---|
-| E1 | Hold the phone upright at ~1 m, drop it onto the cushion, **don't touch it for 10 s** | Card shows *Checking impact…*, then **Fall detected** after ~7.5 s; a fall-alert notification appears |
+| E0 | Open the app after installing (sensing not started) | Sensing starts by itself; the Fall detection card says *Always on…* and who a fall reaches. There is no test button |
+| E1 | Hold the phone ~1 m up (screen locked **or** the app open, any way up), drop it onto the floor, books, a cushion or a mattress, **don't touch it for 10 s** | *Checking impact…*, then **Did you fall? Are you OK?** over the screen after ~7.5 s, buzzing and spoken, with *I'm OK* / *Get help now* |
+| E1a | As E1 with a trusted contact saved, don't answer for 60 s | The contact gets *PervasiveSense alert: I may have fallen…* with the location, and **no call** (a fall never calls) |
+| E1b | Drop it, pick it up within 2 to 3 s and keep holding it | No alert. After up to 30 s: *Last drop at … : not a fall. It kept moving after landing…* |
+| E1c | Put the phone down on a table from a few cm (screen on or off) | No alert, nothing shown |
+| E1d | Phone in a trouser pocket, screen off: take it out and set it down firmly on a table, leave it 10 s | No alert. Either nothing shown, or *not a fall. It came down too gently…* with a speed under 1.5 m/s |
+| E1e | After any drop: Fall detection card › **Show the signal** | A graph: the fall (amber), the impact (red), the stillness window (green), and the time falling, the speed, the peak, the turn and the verdict |
 | E2 | Tap **I'm OK** (on the card or in the notification) | Card returns to *Monitoring*; the alert disappears |
-| E3 | Jump in place, then stand still | No fall alert (body orientation did not change). *Checking impact…* may flash briefly, then returns to *Monitoring* |
-| E4 | Walk, sit down firmly on a chair | No fall alert |
+| E3 | Phone in a trouser pocket: jump in place (or down from a step), then stand still | No fall alert. *Checking impact…* for a few seconds, then *not a fall. It ended up upright…* |
+| E4 | Walk, sit down firmly on a chair | No fall alert (at most *not a fall. It came down too gently…*) |
 
-If E1 does not trigger, the landing was too soft (impact below 2.5 g). Try a
-firmer cushion. Safety score in Daily wellness drops by 25 per confirmed fall.
+If E1 does not trigger, the Fall detection card says why (*Last drop at …*). If it says the landing was too soft, drop it onto
+the floor or a firmer surface; if it says nothing, the drop was too short (under about 45 cm). Safety score in Daily wellness drops by 25 per confirmed fall.
+
+### Pictures for a report
+
+The fall alert stays on the screen until a button is tapped, so there is time to take a screenshot.
+
+1. **Screenshot:** Power + Volume down together (on Realme/OPPO ColorOS also a three-finger swipe down,
+   Settings › Additional settings › Screenshot). Take it **before** tapping *I'm OK*; it also works on
+   the lock screen.
+2. **The whole test as a video:** start the phone's screen recorder from Quick Settings before the
+   drop. It records *Checking impact…*, the alert and the card; pause the video and screenshot the frames
+   you need.
+3. **The drop itself:** ask someone to film or photograph it with a second phone (shows the height and
+   the surface).
+4. **The signal:** after each test, Fall detection card › **Show the signal**, then screenshot it. One
+   for a fall (E1) and one for a set-down (E1d) side by side show why one is a fall and the other is not.
+5. **The contact's text:** screenshot the received message on the contact's phone (E1a).
+
+For each row, note: test, what you did, expected, result, screenshot.
 
 ## F. Vehicle & road hazards (**as a passenger only**)
 
@@ -96,13 +120,38 @@ report after the vehicle starts moving.
 | H1 | Deny *Physical activity* (Android 14+) | Clear message above the button explaining it is required; no crash |
 | H2 | Deny *Physical activity* (Android 10–13) | Sensing starts; Road hazards says it needs the permission |
 
-## I. Fit-to-drive check (**never drive for these tests**)
+## I. Fit-to-drive check (**never drive for these tests**, about 10 min)
 
 | # | Do this | Pass if |
 |---|---|---|
-| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the dashboard card shows *Learning your normal walk* |
-| I2 | Walk normally 3 min with the phone in a front trouser pocket, then wait 5 min | *Your normal walk* shows *Checking, still learning*; minutes learned increase |
-| I3 | Record normal balance (feet together, phone flat on chest, 30 s) | Beep at start and end; *Saved your normal balance (1 of 5)* |
+| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on, tap *Turn on* | *Set up (0 of 3 done)* appears |
+| I2 | Tap **Start walk recording**, lock the screen, phone in a front trouser pocket, walk normally | Within about 15 s the phone says *Recording your walk*, then *Halfway there*, then *Your walk is recorded* (about 2 min); Step 1 shows ✓ and Step 2 unlocks |
+| I3 | Tap **Record balance (voice guided)** 3 times: **stand still**, feet together, phone flat on your chest, follow the voice | Step 2 shows ✓; Step 3 (contact) unlocks; *Before you drive* and *Test it* appear |
+| I4 | **Test it → A. Normal walk → Start**, lock the screen, walk normally ~30 s | The phone says *your walk looks normal*; row A shows ✓ |
+| I5 | **B. Wobbly walk → Start**, with someone next to you sway side to side with uneven steps ~30 s | The phone says *very different*; a notification and the *Take the balance check* card appear; row B shows ✓ |
+| I6 | **C. Balance check while swaying → Start** (or *Take the balance check*), sway gently from the hips | *Better not to drive now* with *Find a cab* (and *Call* / *Message* if a contact is saved); row C shows ✓. Tap *I'm not driving* to clear |
+
+Extra checks (optional):
+
+| # | Do this | Pass if |
+|---|---|---|
+| I7 | Walk with the phone in your **hand** | Banner: *Not recording: put the phone in your trouser pocket* |
+| I8 | As a **passenger**, walk 30 s to a car and ride | When the trip is detected a check runs (*Trip started*) |
+| I9 | Turn on *Check when my car's Bluetooth connects*, allow Nearby devices, connect to a car | A check runs (*Car Bluetooth*) before the car moves |
+| I10 | Study mode: participant ID, *Goggles 1*, walk 1 min, balance check, *Export CSV* | The CSV has `segment`, `walk_check` and `balance_check` rows labelled GOGGLES_LOW |
+| I11 | Save a trusted contact (your own second number or a friend who knows), turn on **Alert my contact if I drive after a warning**, allow SMS (and location), tap **Send a test alert** | A 10 s countdown with *Cancel*, then the contact gets *PervasiveSense test…* with a map link; tapping *Cancel* during the countdown sends nothing |
+| I12 | After a real *Check my walk* large gap (walk unsteadily without *Test it*), tap *I'm not driving*, then ride as a **passenger** | Banner *…trips and driving are being watched*; when the trip is detected: reminder *You said you weren't driving…* |
+| I13 | Same, with the car's Bluetooth connecting (passenger, engine off) | A 30 s spoken countdown *Texting … in 30 s*; tap **Cancel – I'm a passenger**: nothing is sent |
+| I14 | Turn the switch off | The dashboard card shows *Off* |
+| I15 | With the alert on, open *Settings ▸* and look under *Send a test alert* | *Keeps running when the app is closed* and *Alert opens over the lock screen* both say ✓ (otherwise tap **Fix**) |
+| I16 | **Passenger only**, no walk check: in a car holder, screen locked, the driver makes slow S-curves in an empty lot for about 1 min | The screen turns on with **Are you OK?**, a 60 s countdown and **I'm OK** / **I'm a passenger**; the question is spoken again at 30 s and 10 s. **I'm OK** stops it. Unanswered: text, then call |
+| I17 | Swipe PervasiveSense away from the recent apps, wait 1 min | The PervasiveSense notification is still there (or comes back within seconds) |
+| I18 | No car: *Settings ▸* **Test drive (no car)**, phone in a pocket (or in the hand), turn a swivel chair **left, then right, then left** like steering, about once a second, for up to a minute (not round and round) | **Are you OK?** over the lock screen, spoken; **I'm OK** stops it; unanswered, a text starting *TEST (practice, no car)*, then a call. Sitting still for the 5 minutes: nothing, and the phone says *No unsteady driving was noticed* |
+
+---|---|---|
+| I1 | Dashboard, tap the **Fit to drive** card, turn the switch on | A consent dialog explains the limits; after *Turn on* the *Set up (0 of 3 done)* card appears |
+| I2 | Put the phone in a front trouser pocket and walk normally for 2 min | Step 1 shows *x of 2 min recorded* rising right away; with the phone in the hand the banner says *Not recording* |
+| I3 | Tap **Record balance (voice guided)** three times (feet together, phone flat on chest) | The phone speaks each step and the result; Step 2 shows *1 of 3*, *2 of 3*, then ✓; *Before you drive* appears when steps 1 and 2 are done |
 | I4 | Walk normally 30 s, tap **Check my walk** | *Normal for you* (or *Unusual*); the time and walking seconds are shown |
 | I5 | Wear impairment-simulation goggles (with a spotter) or walk deliberately unsteadily, swaying side to side with irregular steps, for 30 s; tap **Check my walk** | *Very different from your normal*, an amber *Take the balance check* card, the features that differed most |
 | I6 | Balance check while swaying | *Better not to drive now* with *Find a cab*; with a trusted contact saved, *Call* and *Message* open the dialer / SMS app with the number filled in |
@@ -119,5 +168,5 @@ report after the vehicle starts moving.
 
 ## Automated tests (run on every GitHub push)
 
-- 82 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 174 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

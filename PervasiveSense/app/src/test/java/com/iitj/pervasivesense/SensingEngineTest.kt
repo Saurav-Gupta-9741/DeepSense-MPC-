@@ -100,6 +100,92 @@ class SensingEngineTest {
         override fun onSnapshot(snapshot: SensingSnapshot) { snapshots += snapshot }
         override fun onTransition(event: TransitionEvent) { transitions += event }
         override fun onEcoModeChanged(eco: Boolean) { ecoChanges += eco }
+        val fit = ArrayList<FitToDriveEvent>()
+        override fun onFitToDrive(event: FitToDriveEvent, snapshot: SensingSnapshot) { fit += event }
+        val falls = ArrayList<SensingSnapshot>()
+        var cleared = 0
+        override fun onFallConfirmed(snapshot: SensingSnapshot) { falls += snapshot }
+        override fun onFallCleared() { cleared++ }
+    }
+
+    /**
+     * The phone held upright in the hand (screen towards the face) for [heldSec], then let go from about
+     * 1 m: 0.35 s of free fall, then a soft landing (a cushion: an impact over several samples, bounces)
+     * or a [hard] one (books: one 6 g tick), then lying flat and still for 12 s.
+     */
+    private fun drop(heldSec: Double = 3.0, hard: Boolean = false, seed: Int = 5): Recording {
+        val rnd = java.util.Random(seed.toLong())
+        val g = 9.80665f
+        val rows = ArrayList<FloatArray>()
+        fun add(n: Int, f: (Int) -> FloatArray) { for (i in 0 until n) rows += f(i) }
+        fun noise(s: Double) = (rnd.nextGaussian() * s).toFloat()
+        add((heldSec * 50).toInt()) { floatArrayOf(noise(0.3), 0.71f * g + noise(0.3), 0.71f * g + noise(0.3), noise(0.05), noise(0.05), noise(0.05)) }
+        add(18) { floatArrayOf(noise(0.2), 0.2f * g, noise(0.2), noise(2.0), noise(2.0), noise(2.0)) }
+        if (hard) {
+            rows += floatArrayOf(0f, 0f, 6f * g, 0f, 0f, 0f)
+        } else {
+            // A cushion: the landing lasts about 80 ms (several samples above 2.5 g at 50 Hz).
+            rows += floatArrayOf(0f, 2.0f * g, 2.4f * g, 0f, 0f, 0f)
+            rows += floatArrayOf(0f, 2.5f * g, 3.0f * g, 0f, 0f, 0f)
+            rows += floatArrayOf(0f, 2.2f * g, 2.6f * g, 0f, 0f, 0f)
+            rows += floatArrayOf(0f, -1.5f * g, 1.8f * g, 0f, 0f, 0f)
+            rows += floatArrayOf(0.8f * g, 0.5f * g, 2.2f * g, 0f, 0f, 0f)
+            add(40) { i -> floatArrayOf((1.2 * g * kotlin.math.sin(i * 0.9)).toFloat(), 0.3f * g, (g + g * kotlin.math.cos(i * 1.3)).toFloat(), 0f, 0f, 0f) }
+        }
+        add(600) { floatArrayOf(noise(0.05), noise(0.05), g + noise(0.05), noise(0.005), noise(0.005), noise(0.005)) }
+        return Recording(LongArray(rows.size) { it * 20_000_000L }, rows.toTypedArray())
+    }
+
+    @Test
+    fun aDropFromTheHandWithTheScreenOnIsAFall() {
+        // Always on, no test mode: the phone in use (this app on screen) flies out of the hand of a
+        // person who falls, lands on a cushion-like surface and lies there.
+        val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
+        e.setUiVisible(true)
+        play(e, drop())
+        assertEquals("last=${r.snapshots.last().lastFallCheck?.check}", 1, r.falls.size)
+        assertEquals(FallCheck.FALL, r.snapshots.last().lastFallCheck?.check)
+    }
+
+    @Test
+    fun aHardFloorLandingFromTheHandIsAFall() {
+        // Onto a hard floor (or books): one sharp tick. A person who falls drops the phone onto hard floors too.
+        for (screenOn in listOf(true, false)) {
+            val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
+            e.setScreenOn(screenOn); e.setUiVisible(screenOn)
+            play(e, drop(hard = true))
+            assertEquals("screen on: $screenOn", 1, r.falls.size)
+        }
+    }
+
+    @Test
+    fun aFallClearsItselfWhenThePersonGetsUpAndWalks() {
+        val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
+        e.setScreenOn(false) // in a pocket
+        play(e, drop(heldSec = 3.0))
+        assertEquals(1, r.falls.size)
+        assertEquals(0, r.cleared)
+        val t = start + drop().size * 20_000_000L
+        play(e, Recording.fixture("walking_pocket"), at = t)
+        assertEquals(1, r.cleared) // the "Are you OK?" countdown is called off
+        assertTrue(r.snapshots.none { it.sensorTimeNanos > t + 10_000_000_000L && it.fallState == FallState.FALL_CONFIRMED })
+    }
+
+    @Test
+    fun aTestDriveWorksFromRawJitteredSensorEvents() {
+        // The whole pipeline (device events, resampling, engine, fit-to-drive), no vehicle detected.
+        val c = MotionEnergyClassifier(); val r = Recorder(); val e = engine(c, r)
+        e.setFitToDriveEnabled(true)
+        e.setScreenOn(false)
+        play(e, Recording.constant(10.0, 0f, 0f, 9.81f, noise = 0.05f))
+        e.startTestDrive()
+        assertTrue(r.snapshots.last().fitToDrive.testDriveSecondsLeft in 299..300)
+        play(e, chairTurning(45.0, seed = 190), at = start + 10_000_000_000L)
+        val asked = r.fit.filterIsInstance<FitToDriveEvent.ErraticDriving>()
+        assertEquals(1, asked.size)
+        assertTrue(asked.single().test)
+        assertTrue(r.fit.filterIsInstance<FitToDriveEvent.TestDriveCoach>().any { it.tip == TestDriveTip.SCORE })
+        assertTrue(r.snapshots.none { it.context == "IN_VEHICLE" }) // never shown as a real trip
     }
 
     private val start = 1_000_000_000L
