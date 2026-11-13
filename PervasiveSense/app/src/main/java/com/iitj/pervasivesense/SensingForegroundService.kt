@@ -479,7 +479,7 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
                 // No warning: ask the driver first ("Are you OK?"); only no answer reaches the contact.
                 if (!alert().start(AlertKind.UNSTEADY_DRIVING, test = event.test)) {
                     notifyFit(getString(R.string.fit_notify_erratic_title), getString(R.string.fit_notify_unsteady_text), balanceAction = false)
-                    speak(getString(R.string.fit_say_erratic))
+                    speak(getString(R.string.fit_say_erratic), alarm = true)
                 }
             }
             is FitToDriveEvent.TestDriveCoach -> speak(when (event.tip) {
@@ -529,7 +529,11 @@ class SensingForegroundService : Service(), SensingEngine.Listener, SensingRepos
         }).also { contactAlert = it }
 
     /** With the contact alert on, every trip is watched (a higher bar, the driver asked first), not only after a warning. */
-    private fun updateWatchEveryTrip() { engine?.setFitWatchEveryTrip(ContactAlert.ready(this)) }
+    /**
+     * Every drive is watched, with or without a contact: unsteady driving with no contact alert set
+     * up still warns the driver out loud (on the alarm volume) and in a notification.
+     */
+    private fun updateWatchEveryTrip() { engine?.setFitWatchEveryTrip(true) }
 
     /**
      * Health, plus location while the contact alert may need it (the location of

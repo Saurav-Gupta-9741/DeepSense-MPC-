@@ -410,7 +410,7 @@ class MainActivity : AppCompatActivity() {
             f.watchingDriving -> getString(R.string.fit_watching_driving) to R.color.accent_amber
             ContactAlert.ready(this@MainActivity) -> getString(R.string.fit_card_watch_all,
                 FitToDriveStore.contactName(this@MainActivity).ifBlank { FitToDriveStore.contactPhone(this@MainActivity) }) to R.color.accent_emerald
-            else -> getString(R.string.fit_card_watch_off) to R.color.text_muted
+            else -> getString(R.string.fit_card_watch_voice) to R.color.accent_amber
         }
         tvFitWatch.visibility = if (watch != null) View.VISIBLE else View.GONE
         watch?.let { (text, col) -> tvFitWatch.text = text; tvFitWatch.setTextColor(color(col)) }

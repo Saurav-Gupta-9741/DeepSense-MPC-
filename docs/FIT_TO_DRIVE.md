@@ -558,3 +558,17 @@ Tests (2 new, 158 JVM tests): every kind of drop gets its reason; everyday movem
   (the reported phone case), screen up and down; a pocket fall onto a hard floor; struggling then
   lying still; getting up and standing; a dropped phone picked up (at once and after 3 s); a jump
   down from a step; plus the engine end to end with the screen on and off.
+
+## v3.14: nothing to tap in the car
+
+- **Fit to drive is on by default** (the switch turns it off). It learns the normal walk from everyday
+  walking; the set-up walk only speeds that up.
+- **Every drive is watched, with or without a contact.** Sitting in a car (or a bus, a cab) is
+  detected by itself (Android's activity recognition, about 1 to 2 minutes after it starts moving,
+  or at once from the car's Bluetooth if that is turned on). Then, with no button:
+  1. the walk to the car (the last 5 minutes) is checked and the result spoken;
+  2. the driving is watched: weaving, sudden swerves, harsh braking;
+  3. clearly unsteady driving asks "Are you OK?" (with a contact alert: no answer in 60 s texts and
+     calls the contact; without one: a spoken warning on the alarm volume and a notification).
+- The buttons are only for trying it out: **Check my walk** (now), **Test drive (no car)** (a swivel
+  chair stands in for the car) and **Balance check**.

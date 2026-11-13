@@ -18,7 +18,8 @@ object FitToDriveStore {
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun isEnabled(c: Context) = prefs(c).getBoolean("enabled", false)
+    /** On by default: the walk is learned and every drive watched with no button to press (the switch turns it off). */
+    fun isEnabled(c: Context) = prefs(c).getBoolean("enabled", true)
     fun setEnabled(c: Context, on: Boolean) = prefs(c).edit().putBoolean("enabled", on).apply()
 
     /** Detect the car's Bluetooth to check before the car moves (opt-in). */

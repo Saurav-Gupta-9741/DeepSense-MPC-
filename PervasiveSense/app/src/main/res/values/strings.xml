@@ -93,17 +93,17 @@
     <string name="card_fit">Fit to drive</string>
     <string name="fit_open">Open</string>
     <string name="fit_card_off">Checks your walk before you drive, and watches every drive.</string>
-    <string name="fit_card_learning">Learning your normal walk (%1$d%%)</string>
+    <string name="fit_card_learning">Learning your normal walk from your everyday walking (%1$d%%). Every drive is already watched.</string>
     <string name="fit_card_head_off">Not turned on</string>
     <string name="fit_card_head_stopped">Not watching</string>
     <string name="fit_card_stopped">Sensing is stopped, so walks and drives are not checked.</string>
     <string name="fit_card_head_setup">Finish set-up</string>
     <string name="fit_card_balance_left">Record your standing balance (%1$d of %2$d done).</string>
     <string name="fit_card_head_ready">Ready</string>
-    <string name="fit_card_no_check">Before you drive, tap Check my walk and walk for 30 s.</string>
+    <string name="fit_card_no_check">Nothing to tap: your walk to the car is checked by itself when a drive starts. (Check my walk checks it now.)</string>
     <string name="fit_card_last">Last check at %1$s (%2$s)</string>
     <string name="fit_card_watch_all">🛡 Every drive is watched. Unsteady driving alerts %1$s.</string>
-    <string name="fit_card_watch_off">Contact alert off: turn it on to have every drive watched.</string>
+    <string name="fit_card_watch_voice">🛡 Every drive is watched: unsteady driving is warned out loud. Turn on the contact alert to also have someone texted.</string>
     <string name="fit_card_action_on">Turn on</string>
     <string name="fit_card_action_setup">Continue set-up</string>
 
