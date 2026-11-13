@@ -12,7 +12,7 @@ screen locked.
 > Fit-to-drive check: [`docs/FIT_TO_DRIVE.md`](docs/FIT_TO_DRIVE.md) ·
 > Phone test checklist: [`docs/PHONE_TEST_PLAN.md`](docs/PHONE_TEST_PLAN.md)
 
-> **Version 2.x.** v1 could not respond in real time and its model never loaded on
+> **Version 3.15** (`release/PervasiveSense-v3.15-fit-to-drive.apk`). Since v2: v1 could not respond in real time and its model never loaded on
 > a phone. The root causes, the fixes and the evidence are in
 > [What changed in v2](#what-changed-in-v2). Build the APK from source (see
 > [Build & run](#build--run)); the v1 APKs were removed because they contain the
@@ -197,7 +197,7 @@ checked against deliberately broken inputs.
 ## Get the APK
 
 Every push is built and tested by GitHub Actions (`.github/workflows/build.yml`):
-49 engine tests, 24 model tests on real data, then the debug APK.
+174 engine tests, 24 model tests on real data, then the debug APK. The latest phone build is also in `release/`.
 
 - **Latest build:** Actions tab → newest green *Build & test* run → *Artifacts* → `PervasiveSense-debug-apk` (a zip containing the APK).
 - **Release download:** pushing a tag such as `v2.0.0` publishes a GitHub Release with the APK attached.
