@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.btnFallAck.setOnClickListener { SensingRepository.acknowledgeFall() }
+        binding.btnFallSignal.setOnClickListener { shownFallCheck?.let { showFallSignal(it) } }
         val openFit = View.OnClickListener { startActivity(Intent(this, FitToDriveActivity::class.java)) }
         binding.cardFit.setOnClickListener(openFit)
         binding.btnFitOpen.setOnClickListener(openFit)
@@ -326,16 +327,57 @@ class MainActivity : AppCompatActivity() {
         tvFallDetail.text = if (c == null) {
             if (s.fallState == FallState.MONITORING) fallWatchText() else getString(detail)
         } else getString(R.string.fall_last_check,
-            fitTime.format(Date(c.wallMillis)), c.peakG, getString(when (c.check) {
-                FallCheck.FALL -> R.string.fall_check_fall
-                FallCheck.HARD_LANDING -> R.string.fall_check_hard
-                FallCheck.MOVED -> R.string.fall_check_moved
-                FallCheck.NO_TURN -> R.string.fall_check_no_turn
-                FallCheck.SOFT_LANDING -> R.string.fall_check_soft
-                FallCheck.GAP -> R.string.fall_check_gap
-            }))
+            fitTime.format(Date(c.wallMillis)), c.peakG, c.verdict?.speedMs ?: 0f, fallCheckText(c))
         fallDot.backgroundTintList = tint(dot)
+        // The signal of the last judged drop (also while a fall is shown): for a report, and to see why.
+        shownFallCheck = s.lastFallCheck?.takeIf { s.fallState != FallState.IMPACT_SUSPECTED &&
+            (it.verdict?.trace?.size ?: 0) > 1 && System.currentTimeMillis() - it.wallMillis < 600_000L }
+        btnFallSignal.visibility = if (shownFallCheck != null) View.VISIBLE else View.GONE
         btnFallAck.visibility = if (s.fallState == FallState.FALL_CONFIRMED) View.VISIBLE else View.GONE
+    }
+
+    private var shownFallCheck: FallCheckReport? = null
+
+    private fun fallCheckText(c: FallCheckReport): String = getString(when (c.check) {
+        FallCheck.FALL -> R.string.fall_check_fall
+        FallCheck.HARD_LANDING -> R.string.fall_check_hard
+        FallCheck.SET_DOWN -> if ((c.verdict?.speedMs ?: 0f) < 1.5f) R.string.fall_check_set_down else R.string.fall_check_held_flat
+        FallCheck.MOVED -> R.string.fall_check_moved
+        FallCheck.NO_TURN -> R.string.fall_check_no_turn
+        FallCheck.SOFT_LANDING -> R.string.fall_check_soft
+        FallCheck.GAP -> R.string.fall_check_gap
+    })
+
+    /** The acceleration around the last judged drop, with what was measured and the verdict. */
+    private fun showFallSignal(c: FallCheckReport) {
+        val v = c.verdict ?: return
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        box.addView(FallSignalView(this, v))
+        val turned = if (v.turnDeg.isNaN()) getString(R.string.fall_signal_turn_none)
+            else getString(R.string.fall_signal_turn, v.turnDeg)
+        box.addView(android.widget.TextView(this).apply {
+            text = getString(R.string.fall_signal_summary,
+                v.fallSec, getString(if (v.dropped) R.string.fall_signal_dropped else R.string.fall_signal_body),
+                v.speedMs, v.peakG, turned, fallCheckText(c))
+            setTextColor(color(R.color.text_main))
+            textSize = 13f
+            setPadding(0, pad / 2, 0, 0)
+        })
+        box.addView(android.widget.TextView(this).apply {
+            setText(R.string.fall_signal_legend)
+            setTextColor(color(R.color.text_muted))
+            textSize = 11f
+            setPadding(0, pad / 2, 0, 0)
+        })
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.fall_signal_title, timeFormat.format(Date(c.wallMillis))))
+            .setView(android.widget.ScrollView(this).apply { addView(box) })
+            .setPositiveButton(R.string.fall_signal_close, null)
+            .show()
     }
 
     /** Fall detection is always on; say who a fall reaches. */

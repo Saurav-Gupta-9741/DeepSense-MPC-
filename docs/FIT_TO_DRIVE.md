@@ -572,3 +572,26 @@ Tests (2 new, 158 JVM tests): every kind of drop gets its reason; everyday movem
      calls the contact; without one: a spoken warning on the alarm volume and a notification).
 - The buttons are only for trying it out: **Check my walk** (now), **Test drive (no car)** (a swivel
   chair stands in for the car) and **Balance check**.
+
+## v3.15: a phone set down on a table is not a fall
+
+- **The phone report:** the phone was just put on a table and it asked "Did you fall?". Taken out of
+  the pocket (screen off) and set down firmly, it had everything v3.14 looked for: a short light
+  moment, a 3 g rattle, a 90° turn (standing up in the pocket, flat on the table), then stillness.
+- **New: the speed at the hit.** The velocity gained while lighter than 1 g, minus what braking took
+  off, summed back from the first hard contact. A hand always brakes before setting a phone down
+  (it hits at well under 1 m/s); a fall does not (from standing, about 2 to 4 m/s). A fall must hit at
+  **1.5 m/s or more**. It is taken at the first contact (the knees before the body), so a fall that
+  lands in two stages still counts.
+- **Carried by the body** (a dip shorter than a real drop): the phone must have been standing up
+  before (screen at least 40° from flat, as in the pocket of a person standing or walking; a phone held
+  flat over a table is not), and it must end up turned at least **45°** (was 30°).
+- Came to rest like that but too slow: shown as *not a fall. It came down too gently, like a phone set
+  down by hand (or sitting down)*, with the speed, so it can be seen that it was judged.
+- **Show the signal:** the Fall detection card shows a graph of the last judged drop: the acceleration
+  from 2.5 s before the impact to 10 s after, the fall shaded amber, the impact in red, the stillness
+  window in green, and what was measured (time falling, speed, peak, turn, verdict). For the report,
+  and to see on the phone why a drop was or was not a fall.
+- Tests (4 new, 174 JVM tests): the reported case (a fall under v3.14's rules, set down now); a phone
+  held 35° from flat and let go 25 cm above a table; sitting down hard on a chair; a fall where the
+  knees hit first. Every earlier fall case still counts.

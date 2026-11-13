@@ -75,7 +75,18 @@
     <string name="fall_notify_no_contact">It looks like you fell. Tap I’m OK if you are fine. Save a trusted contact (Fit to drive › Settings) to have someone alerted when you don’t answer.</string>
     <string name="fall_sms">PervasiveSense alert: I may have fallen and did not answer my phone. Please call me now.</string>
     <string name="fall_check_soft">not a fall. It landed too softly to feel (a bed or a deep cushion); a fall onto the floor hits harder.</string>
-    <string name="fall_last_check">Last drop at %1$s (%2$.1f g): %3$s</string>
+    <string name="fall_last_check">Last drop at %1$s (%2$.1f g, hit at %3$.1f m/s): %4$s</string>
+    <string name="fall_check_set_down">not a fall. It came down too gently, like a phone set down by hand (or sitting down): a fall hits at 1.5 m/s or more.</string>
+    <string name="fall_check_held_flat">not a fall. It was held flat and dropped a short way, like a phone put on a table.</string>
+    <string name="fall_show_signal">Show the signal</string>
+    <string name="fall_signal_title">Last drop at %1$s</string>
+    <string name="fall_signal_summary">Fell: %1$.2f s lighter than 0.75 g (%2$s)\nHit: %3$.1f m/s, peak %4$.1f g\nAfter: %5$s\nVerdict: %6$s</string>
+    <string name="fall_signal_dropped">a real drop: 0.3 s or more</string>
+    <string name="fall_signal_body">carried by the body, or a short drop</string>
+    <string name="fall_signal_turn">turned %1$.0f° from before</string>
+    <string name="fall_signal_turn_none">not judged (judged at the impact)</string>
+    <string name="fall_signal_legend">Acceleration |a| in g, 0 s = the impact (red). Amber: the fall (lighter than 0.75 g). Green: where it must lie still. A fall: hits at 1.5 m/s or more, then lies still, turned (or flat after a real drop).</string>
+    <string name="fall_signal_close">Close</string>
     <string name="fall_check_fall">a fall.</string>
     <string name="fall_check_hard">not a fall. A short knock, like the phone put down on a table.</string>
     <string name="fall_check_moved">not a fall. It kept moving after landing (picked up, or got up and walked).</string>

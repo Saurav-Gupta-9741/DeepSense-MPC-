@@ -65,12 +65,32 @@ Simulate with the phone only, onto something soft but firm (sofa cushion or matt
 | E1a | As E1 with a trusted contact saved, don't answer for 60 s | The contact gets *PervasiveSense alert: I may have fallen…* with the location, and **no call** (a fall never calls) |
 | E1b | Drop it, pick it up within 2 to 3 s and keep holding it | No alert. After up to 30 s: *Last drop at … : not a fall. It kept moving after landing…* |
 | E1c | Put the phone down on a table from a few cm (screen on or off) | No alert, nothing shown |
+| E1d | Phone in a trouser pocket, screen off: take it out and set it down firmly on a table, leave it 10 s | No alert. Either nothing shown, or *not a fall. It came down too gently…* with a speed under 1.5 m/s |
+| E1e | After any drop: Fall detection card › **Show the signal** | A graph: the fall (amber), the impact (red), the stillness window (green), and the time falling, the speed, the peak, the turn and the verdict |
 | E2 | Tap **I'm OK** (on the card or in the notification) | Card returns to *Monitoring*; the alert disappears |
 | E3 | Phone in a trouser pocket: jump in place (or down from a step), then stand still | No fall alert. *Checking impact…* for a few seconds, then *not a fall. It ended up upright…* |
-| E4 | Walk, sit down firmly on a chair | No fall alert |
+| E4 | Walk, sit down firmly on a chair | No fall alert (at most *not a fall. It came down too gently…*) |
 
 If E1 does not trigger, the Fall detection card says why (*Last drop at …*). If it says the landing was too soft, drop it onto
 the floor or a firmer surface; if it says nothing, the drop was too short (under about 45 cm). Safety score in Daily wellness drops by 25 per confirmed fall.
+
+### Pictures for a report
+
+The fall alert stays on the screen until a button is tapped, so there is time to take a screenshot.
+
+1. **Screenshot:** Power + Volume down together (on Realme/OPPO ColorOS also a three-finger swipe down,
+   Settings › Additional settings › Screenshot). Take it **before** tapping *I'm OK*; it also works on
+   the lock screen.
+2. **The whole test as a video:** start the phone's screen recorder from Quick Settings before the
+   drop. It records *Checking impact…*, the alert and the card; pause the video and screenshot the frames
+   you need.
+3. **The drop itself:** ask someone to film or photograph it with a second phone (shows the height and
+   the surface).
+4. **The signal:** after each test, Fall detection card › **Show the signal**, then screenshot it. One
+   for a fall (E1) and one for a set-down (E1d) side by side show why one is a fall and the other is not.
+5. **The contact's text:** screenshot the received message on the contact's phone (E1a).
+
+For each row, note: test, what you did, expected, result, screenshot.
 
 ## F. Vehicle & road hazards (**as a passenger only**)
 
@@ -148,5 +168,5 @@ Extra checks (optional):
 
 ## Automated tests (run on every GitHub push)
 
-- 170 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
+- 174 JVM tests of the sensing engine: `cd PervasiveSense && ./gradlew :app:testDebugUnitTest`
 - 24 model tests: `pytest tests/test_tflite_model.py` (see `docs/TESTING.md`)

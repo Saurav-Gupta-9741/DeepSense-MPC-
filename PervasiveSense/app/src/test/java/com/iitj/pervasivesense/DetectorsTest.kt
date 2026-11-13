@@ -2,12 +2,14 @@ package com.iitj.pervasivesense
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 private const val G = 9.80665f
@@ -218,7 +220,7 @@ class FallDetectorTest {
     @Test
     fun withTheOldRulesTheTableWasAFall() {
         // The bug, reproduced: one low-g sample + any 2.5 g spike + tilt change + stillness was enough.
-        val old = { FallDetector(lowG = 0.6f, minLowGSamples = 1, minImpactSamples = 1) }
+        val old = { FallDetector(lowG = 0.6f, minLowGSamples = 1, minImpactSamples = 1, minFallSpeedMs = 0f, uprightCos = 1f, bodyTurnDeg = 30f) }
         assertTrue(droppedOnTable().run(old()).first)
         assertTrue(putDownHardOnTable().run(old()).first)
     }
@@ -236,11 +238,98 @@ class FallDetectorTest {
     @Test
     fun phonePutDownWhileLookingAtItIsNotAFall() {
         // Even a fall-like put-down (a short dip, heavy contact) while the phone was held and looked at.
-        val b = Builder().inHand(3.0).freeFall(0.2).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
+        val b = Builder().inHand(3.0).freeFall(0.25).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
         val heldUntil = 3 * 50 + 10
         assertFalse(b.run(FallDetector()) { it < heldUntil }.first)
-        // The same motion with the phone on the body (not held) is a fall: the gate is only the hand.
-        assertTrue(b.run(FallDetector()).first)
+        // The same dip and impact with the phone standing up in a pocket (not held) is a fall. (Held in the
+        // hand at 45° but not looked at, a 25 cm drop that lands flat is a phone put down.)
+        val pocket = Builder().append(standing()).freeFall(0.25).impact(4f).bounces(0.8).hold(10.0, 0f, 0f, G)
+        assertTrue(pocket.run(FallDetector()).first)
+    }
+
+    // ---- Real phone (v3.14): just put on the table, it said "Did you fall?". A hand brakes; a fall does not.
+
+    /** v3.14's rules: no speed, no "standing up before", a 30° turn was enough. */
+    private fun v314() = FallDetector(minFallSpeedMs = 0f, uprightCos = 1f, bodyTurnDeg = 30f)
+
+    /** Rotate from [a] to [b] over [sec] (the hand taking the phone out of the pocket), with hand tremor. */
+    private fun Builder.turn(sec: Double, a: FloatArray, b: FloatArray) = apply {
+        val n = (sec * 50).toInt()
+        val rnd = Random(11)
+        for (i in 0 until n) {
+            val f = i / (n - 1f)
+            val v = FloatArray(3) { a[it] + (b[it] - a[it]) * f }
+            val norm = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+            rows += FloatArray(3) { v[it] / norm * G + (0.05f * G * rnd.nextGaussian()) }
+        }
+    }
+
+    private fun upright(): FloatArray {
+        val s = standing()
+        return floatArrayOf(s.data.map { it[0] }.average().toFloat(), s.data.map { it[1] }.average().toFloat(), s.data.map { it[2] }.average().toFloat())
+    }
+
+    /**
+     * Standing, phone in the pocket (screen off): taken out and turned flat (1 s), brought down quickly
+     * (0.16 s at 0.45 g), braked by the hand (0.12 s at 1.35 g), set down firmly (3.2 g, rattling for
+     * 3 samples), then lying flat on the table.
+     */
+    private fun takenOutAndSetDown() = Builder().append(standing()).turn(1.0, upright(), floatArrayOf(0f, 0f, G))
+        .hold(0.16, 0f, 0f, 0.45f * G, 0.01f).hold(0.12, 0f, 0f, 1.35f * G, 0.01f)
+        .hold(0.02, 0f, 0f, 3.2f * G, 0f).hold(0.02, 0f, 0f, 2.0f * G, 0f).hold(0.02, 0f, 0f, 1.7f * G, 0f)
+        .hold(12.0, 0f, 0f, G, 0.003f)
+
+    @Test
+    fun aPhoneTakenFromThePocketAndSetDownOnATableIsNotAFall() {
+        // The bug, reproduced: a dip, a 3 g rattle, turned 90° (pocket to flat) and still was a fall.
+        assertTrue(takenOutAndSetDown().run(v314()).first)
+        val d = FallDetector()
+        assertFalse(takenOutAndSetDown().run(d).first)
+        val v = d.lastVerdict!!
+        assertEquals(FallCheck.SET_DOWN, v.check)
+        assertTrue("hit at ${v.speedMs} m/s", v.speedMs < 1f)
+        // The signal is kept for the graph: 2.5 s before the impact and up to 10 s after.
+        assertTrue(v.impactIndex in 100..126)
+        assertTrue(v.trace[v.impactIndex] > 2.5f)
+        assertTrue(v.trace.size - v.impactIndex > 350)
+    }
+
+    @Test
+    fun aPhoneHeldFlatAndDroppedAShortWayOntoATableIsNotAFall() {
+        // Held nearly flat over the table (35° from flat), let go 25 cm up (fast enough), rattles, lies
+        // flat. It was never standing up as on a body, and turned only 35°.
+        val b = Builder().hold(3.0, 0f, 0.57f * G, 0.82f * G, 0.03f).freeFall(0.22).impact(4f).hold(12.0, 0f, 0f, G, 0.003f)
+        assertTrue(b.run(v314()).first)
+        val d = FallDetector()
+        assertFalse(b.run(d).first)
+        assertNotEquals(FallCheck.FALL, d.lastVerdict?.check)
+    }
+
+    @Test
+    fun sittingDownHardOnAChairIsNotAFall() {
+        // Phone in the trouser pocket: dropping onto a chair (0.3 s at 0.6 g, a 2.8 g bump), then sitting
+        // still with the thigh level. Slower than a fall.
+        val s = Recording.fixture("sitting_pocket")
+        val seat = floatArrayOf(s.data.map { it[0] }.average().toFloat(), s.data.map { it[1] }.average().toFloat(), s.data.map { it[2] }.average().toFloat())
+        val b = Builder().append(standing()).hold(0.3, 0f, -0.6f * G, 0f, 0.01f)
+            .hold(0.02, 0f, -1.8f * G, 2.0f * G, 0f).hold(0.02, 0f, -1.0f * G, 1.6f * G, 0f).hold(0.02, 0f, -0.9f * G, 1.5f * G, 0f)
+            .hold(12.0, seat[0], seat[1], seat[2], 0.01f)
+        val d = FallDetector()
+        assertFalse(b.run(d).first)
+        assertEquals(FallCheck.SET_DOWN, d.lastVerdict?.check)
+    }
+
+    @Test
+    fun aFallWhereTheKneesHitFirstIsStillAFall() {
+        // Standing, phone in the pocket: 0.28 s falling (0.4 g), the knees hit (2 g), then the body (4.5 g),
+        // lying still. The speed is taken at the knees, before they braked anything.
+        val b = Builder().append(standing()).hold(0.28, 0f, -0.4f * G, 0f, 0.01f)
+            .hold(0.04, 0f, -1.2f * G, 1.6f * G, 0f).hold(0.06, 0f, -0.5f * G, 0.7f * G, 0f)
+            .hold(0.02, 0f, 2.5f * G, 3.8f * G, 0f).hold(0.02, 0f, 1.8f * G, 2.2f * G, 0f).hold(0.02, 0f, 1.2f * G, 1.5f * G, 0f)
+            .hold(12.0, 0.1f * G, 0f, G, 0.01f)
+        val d = FallDetector()
+        assertTrue("last ${d.lastVerdict?.check}", b.run(d).first)
+        assertTrue("hit at ${d.lastVerdict?.speedMs} m/s", d.lastVerdict!!.speedMs >= 1.5f)
     }
 
     // ---- Always on, every real fall (there is no test mode: nobody knows when a person falls)
